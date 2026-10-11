@@ -1,0 +1,4 @@
+kitaplik.json
+*.db
+__pycache__/
+.env

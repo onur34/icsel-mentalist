@@ -1,0 +1,272 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, EmailStr
+from typing import Literal
+import sqlite3
+import json
+import os
+import time
+import hashlib
+from datetime import datetime
+
+from google import genai
+from google.genai import types
+
+import os
+from dotenv import load_dotenv
+
+app = FastAPI()
+
+load_dotenv() # .env dosyasındaki şifreleri gizlice okur
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+SISTEM_MESAJI_5_SUTUN = """Sen Mentalist'sin. Kullanıcı sana gün içinde parça parça yazdığı TÜM günlük metinlerinin birleştirilmiş halini verecek.
+Görev: Bu toplam bağlamı inceleyip, kullanıcının BUGÜNKÜ zihinsel haritasını tek bir 5 sütunda özetlemek.
+ÇOK ÖNEMLİ KURAL: Her sütunu MAKSİMUM 1 VEYA 2 CÜMLE ile, nokta atışı ve çok kısa yaz.
+ASLA 3. şahıs veya robotik diller kullanma. 'Sen' dili kullan."""
+
+SISTEM_MESAJI_BUYUK_RESIM = """Sen Mentalist'sin. Sana kullanıcının geçmiş günlere ait '5 Sütunluk' bilinçaltı verileri verilecek.
+Görev: Bu verileri birleştirerek olay, bağlam, vitrin duygu ve bastırılan asıl duygu arasındaki ilişkiyi deşifre eden somut, şefkatli ama yüzleştirici bir 'Zihinsel Örüntü Raporu' yazmak.
+
+ÇOK ÖNEMLİ KURAL: 'baskin_etiket' seçimi yaparken, kullanıcının EN SON (en güncel) tarihte yaşadığı duygu durumuna daha büyük bir ağırlık ver. Eski konuları kök sebep olarak diretme.
+Lafı uzatma, doğrudan analizini sun. ASLA 3. şahıs kullanma."""
+
+EtiketTipi = Literal[
+    "tukenmislik_hissi", "ofke_patlamalari", "degersizlik_korkusu", "anksiyete_krizi",
+    "yalnizlik_ve_izolasyon", "onay_ihtiyaci", "yuzlesme_korkusu", "sinir_koyamama",
+    "mukemmeliyetcilik", "zihinsel_asiri_yuklenme", "isyan_ve_haksizlik",
+    "varolus_sancisi_ve_anlam_arayisi", "kurban_psikolojisi", "kontrol_takintisi",
+    "duygusal_bagimlilik", "olagan_bir_gun"
+]
+
+class BesSutunAnaliz(BaseModel):
+    somut_tetikleyici_capasi: str
+    vitrin_duygusu_vs_bastirilan_ihtiyac: str
+    otomatik_savunma_kacis_refleksi: str
+    bedensel_ve_enerji_izi: str
+    acikta_kalan_yarim_birakilan_dongu: str
+    etiket: EtiketTipi
+
+class BuyukResimAnaliz(BaseModel):
+    genel_analiz_metni: str
+    baskin_etiket: EtiketTipi
+
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+RENK_PALETI = {
+    "tukenmislik_hissi": "#1c1f24", "ofke_patlamalari": "#2e0f0f", "degersizlik_korkusu": "#101621",
+    "anksiyete_krizi": "#191c18", "yalnizlik_ve_izolasyon": "#151515", "onay_ihtiyaci": "#171523",
+    "yuzlesme_korkusu": "#221111", "sinir_koyamama": "#1a1e1a", "mukemmeliyetcilik": "#1f2022",
+    "zihinsel_asiri_yuklenme": "#161b22", "isyan_ve_haksizlik": "#2c1212", "varolus_sancisi_ve_anlam_arayisi": "#12151e",
+    "kurban_psikolojisi": "#1a1614", "kontrol_takintisi": "#17181c", "duygusal_bagimlilik": "#1d151c",
+    "olagan_bir_gun": "#0f172a", "varsayilan_karanlik": "#0f172a"
+}
+
+def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
+    for i in range(deneme_sayisi):
+        try:
+            return client.models.generate_content(
+                model='gemini-3.5-flash', 
+                contents=icerik_metni,
+                config=types.GenerateContentConfig(system_instruction=sistem_mesaji, temperature=0.0, top_k=1, response_mime_type="application/json", response_schema=sema)
+            )
+        except Exception as e:
+            if "503" in str(e) or "UNAVAILABLE" in str(e):
+                if i < deneme_sayisi - 1:
+                    time.sleep(3)
+                    continue
+            raise e
+
+def get_db():
+    return sqlite3.connect("hafiza.db", timeout=15.0)
+
+def sifre_kriptola(sifre: str):
+    return hashlib.sha256(sifre.encode()).hexdigest()
+
+def init_db():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    
+    # 1. KULLANICILAR TABLOSU (ID, E-posta, Şifre)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS kullanicilar (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                      email TEXT UNIQUE, 
+                      sifre TEXT)''')
+
+    # 2. GÜNLÜK METİNLER (Artık isim değil, kullanici_id tutuyor)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS gunluk_metinler (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                      kullanici_id INTEGER, 
+                      tarih TEXT, 
+                      saat TEXT, 
+                      metin TEXT)''')
+
+    # 3. İÇGÖRÜLER TABLOSU (Artık isim değil, kullanici_id tutuyor)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS gunluk_icgoruler (
+                      kullanici_id INTEGER, 
+                      tarih TEXT, 
+                      somut_tetikleyici_capasi TEXT, 
+                      vitrin_duygusu_vs_bastirilan_ihtiyac TEXT, 
+                      otomatik_savunma_kacis_refleksi TEXT, 
+                      bedensel_ve_enerji_izi TEXT, 
+                      acikta_kalan_yarim_birakilan_dongu TEXT, 
+                      etiket TEXT,
+                      PRIMARY KEY (kullanici_id, tarih))''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# --- VERİ DOĞRULAMA ŞEMALARI ---
+class GunlukIstegi(BaseModel):
+    kullanici_id: int
+    metin: str
+
+class KullaniciIstegi(BaseModel):
+    email: EmailStr  # E-posta formatını otomatik doğrular (abc@abc.com)
+    sifre: str
+
+def robotik_dil_temizle(metin: str) -> str:
+    if not isinstance(metin, str): return metin
+    return metin.replace("Karakterin", "Senin").replace("Karakter", "Sen").replace("Kullanıcının", "Senin").replace("Kullanıcı", "Sen").replace("Yazar", "Sen")
+
+def kitapliktan_oner(etiket: str):
+    try:
+        if os.path.exists("kitaplik.json"):
+            with open("kitaplik.json", "r", encoding="utf-8") as f:
+                kitaplik = json.load(f)
+            return kitaplik.get(etiket.strip().lower(), {})
+        return {}
+    except: return {}
+
+@app.get("/")
+def ana_sayfa():
+    return FileResponse("index.html") if os.path.exists("index.html") else {"mesaj": "Bulunamadı."}
+
+@app.get("/patrick_jane.jpg")
+def arka_plan_resmi():
+    return FileResponse("patrick_jane.jpg") if os.path.exists("patrick_jane.jpg") else {"mesaj": "Resim bulunamadı."}
+
+# --- KAYIT OL ---
+@app.post("/kayit_ol")
+async def kayit_ol(istek: KullaniciIstegi):
+    email = istek.email.strip().lower()
+    gizli_sifre = sifre_kriptola(istek.sifre)
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO kullanicilar (email, sifre) VALUES (?, ?)", (email, gizli_sifre))
+        yeni_id = cursor.lastrowid # Sistemin atadığı eşsiz ID numarasını al
+        conn.commit()
+        conn.close()
+        return {"durum": "basarili", "kullanici_id": yeni_id, "email": email}
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Bu e-posta adresi sistemde zaten kayıtlı!")
+
+# --- GİRİŞ YAP ---
+@app.post("/giris_yap")
+async def giris_yap(istek: KullaniciIstegi):
+    email = istek.email.strip().lower()
+    gizli_sifre = sifre_kriptola(istek.sifre)
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, email FROM kullanicilar WHERE email = ? AND sifre = ?", (email, gizli_sifre))
+    kullanici = cursor.fetchone()
+    conn.close()
+
+    if not kullanici:
+        raise HTTPException(status_code=400, detail="E-posta adresi veya şifre hatalı!")
+        
+    return {"durum": "basarili", "kullanici_id": kullanici[0], "email": kullanici[1]}
+
+# --- METİN KAYDET ---
+@app.post("/kaydet")
+async def kaydet(istek: GunlukIstegi):
+    if not istek.metin or len(istek.metin.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Metin çok kısa.")
+
+    kullanici_id = istek.kullanici_id
+    try:
+        bugun = datetime.now().strftime("%Y-%m-%d")
+        su_an = datetime.now().strftime("%H:%M:%S")
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        # Metni SADECE O KULLANICI ID'siyle kaydet
+        cursor.execute("INSERT INTO gunluk_metinler (kullanici_id, tarih, saat, metin) VALUES (?, ?, ?, ?)", (kullanici_id, bugun, su_an, istek.metin))
+        
+        cursor.execute("SELECT saat, metin FROM gunluk_metinler WHERE tarih = ? AND kullanici_id = ?", (bugun, kullanici_id))
+        bugunun_kayitlari = cursor.fetchall()
+        conn.commit()
+        conn.close() 
+
+        birlestirilmis_metin = "\n\n".join([f"[{k[0]}] {k[1]}" for k in bugunun_kayitlari])
+        
+        response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
+        analiz = json.loads(response.text)
+        
+        for anahtar, deger in analiz.items():
+            if anahtar != "etiket": analiz[anahtar] = robotik_dil_temizle(deger)
+        if analiz.get("etiket", "").strip().lower() not in RENK_PALETI:
+            analiz["etiket"] = "olagan_bir_gun"
+
+        conn = get_db()
+        cursor = conn.cursor()
+        # İçgörüyü SADECE O KULLANICI ID'si ile güncelle/ekle
+        cursor.execute("DELETE FROM gunluk_icgoruler WHERE tarih = ? AND kullanici_id = ?", (bugun, kullanici_id))
+        cursor.execute('''
+            INSERT INTO gunluk_icgoruler (
+                kullanici_id, tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac,
+                otomatik_savunma_kacis_refleksi, bedensel_ve_enerji_izi, acikta_kalan_yarim_birakilan_dongu, etiket
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            kullanici_id, bugun, analiz.get("somut_tetikleyici_capasi", ""),
+            analiz.get("vitrin_duygusu_vs_bastirilan_ihtiyac", ""), analiz.get("otomatik_savunma_kacis_refleksi", ""),
+            analiz.get("bedensel_ve_enerji_izi", ""), analiz.get("acikta_kalan_yarim_birakilan_dongu", ""),
+            analiz.get("etiket", "")
+        ))
+        conn.commit()
+        conn.close()
+        return {"durum": "basarili"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Gemini sunucuları meşgul.")
+
+# --- BÜYÜK RESMİ ANALİZ ET ---
+@app.get("/genel_analiz/{kullanici_id}")
+async def genel_analiz(kullanici_id: int):
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        # Büyük resmi çekerken SADECE GİRİŞ YAPAN KULLANICININ ID'sine sahip verileri al
+        cursor.execute("SELECT tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac, otomatik_savunma_kacis_refleksi, etiket FROM gunluk_icgoruler WHERE kullanici_id = ? ORDER BY tarih ASC", (kullanici_id,))
+        gecmis_veriler = cursor.fetchall()
+        conn.close()
+
+        if not gecmis_veriler:
+            return {"analiz": "Henüz sana ait yeterli veri yok.", "renk": RENK_PALETI["varsayilan_karanlik"]}
+
+        analiz_gecmisi_metni = "Kullanıcının Zihinsel Örüntüleri:\n"
+        for v in gecmis_veriler:
+            analiz_gecmisi_metni += f"Tarih: {v[0]} | Tetikleyici: {v[1]} | Duygu Çatışması: {v[2]} | Savunma: {v[3]} | Etiket: {v[4]}\n"
+
+        response = gemini_istek_at(analiz_gecmisi_metni, SISTEM_MESAJI_BUYUK_RESIM, BuyukResimAnaliz)
+        buyuk_resim_raporu = json.loads(response.text)
+        baskin_etiket = buyuk_resim_raporu.get("baskin_etiket", "").strip().lower()
+        if baskin_etiket not in RENK_PALETI: baskin_etiket = "olagan_bir_gun"
+
+        analiz_metni = robotik_dil_temizle(buyuk_resim_raporu.get("genel_analiz_metni", ""))
+        arka_plan_rengi = RENK_PALETI.get(baskin_etiket, RENK_PALETI["varsayilan_karanlik"])
+        
+        kitap = kitapliktan_oner(baskin_etiket)
+        if "kitap_adi" in kitap:
+            analiz_metni += f"\n\n<br>📖 <b>Mentalist'in Okuma Önerisi:</b> {kitap['kitap_adi']} - {kitap['yazar']}<br><i>Odaklanman gereken yer: {kitap['bolum']}</i><br><small>{kitap['aciklama']}</small>"
+
+        return {"analiz": analiz_metni, "renk": arka_plan_rengi}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Gemini sunucuları meşgul.")

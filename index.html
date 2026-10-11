@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>İçsel Mentalist</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+
+        body {
+            background-color: #f4f1ea; 
+            background-image: linear-gradient(rgba(244, 241, 234, 0.5), rgba(244, 241, 234, 0.5)), url('patrick_jane.jpg');
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center 100%; 
+            background-attachment: fixed;
+            color: #2c3e50; 
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            margin: 0;
+            padding: 0;
+            transition: background-color 1.5s ease-in-out, background-image 1.5s ease-in-out, color 1.5s ease-in-out;
+        }
+
+        body.analiz-modu { background-image: none !important; color: #e0e0e0 !important; }
+
+        .container {
+            width: 100%; max-width: 700px; margin-top: 40px; padding: 20px; margin-left: auto; margin-right: auto; box-sizing: border-box;
+        }
+
+        h1 { font-weight: 300; letter-spacing: 2px; text-align: center; margin-bottom: 30px; transition: color 1.5s ease; }
+        
+        body:not(.analiz-modu) h1 { color: #2c3e50; }
+        body.analiz-modu h1 { color: #f8fafc; text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+
+        textarea {
+            width: 100%; height: 200px; background-color: rgba(30, 41, 59, 0.85); color: #f8fafc; border: 1px solid #334155;
+            border-radius: 12px; padding: 20px; font-size: 16px; line-height: 1.6; resize: none; outline: none;
+            box-sizing: border-box; backdrop-filter: blur(10px); transition: border-color 0.3s ease;
+        }
+
+        textarea:focus { border-color: #f8fafc; }
+
+        .button-group { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; flex-wrap: wrap; gap: 10px; }
+        
+        .sol-butonlar { display: flex; align-items: center; gap: 10px; }
+        
+        button { padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; border: none; }
+
+        /* TÜM BUTONLAR İÇİN ORTAK KAYDET TASARIMI */
+        .btn-kaydet, .btn-cikis, .btn-analiz { 
+            background-color: rgba(51, 65, 85, 0.9); 
+            color: #f8fafc; 
+        }
+        .btn-kaydet:hover, .btn-cikis:hover, .btn-analiz:hover { 
+            background-color: #475569; 
+        }
+
+        .bilgi-mesaji { font-size: 14px; font-weight: 600; color: #15803d; background-color: rgba(220, 252, 231, 0.85); padding: 4px 10px; border-radius: 6px; opacity: 0; transition: opacity 0.5s ease; display: inline-block; }
+
+        .sonuc-kutusu { background-color: rgba(30, 41, 59, 0.85); border-left: 4px solid #f8fafc; border-radius: 8px; padding: 20px; margin-top: 30px; display: none; backdrop-filter: blur(10px); }
+        .uyari-metni { width: 100%; text-align: center; font-size: 12px; font-style: italic; color: #ef4444; padding: 20px 0; margin-top: 40px; }
+
+        /* GİRİŞ VE KAYIT EKRANI */
+        #girisEkrani {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.95);
+            z-index: 1000; display: flex; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(15px);
+        }
+        #girisEkrani h2 { color: #f8fafc; font-weight: 300; letter-spacing: 2px; margin-bottom: 20px; text-align: center;}
+        #girisEkrani input { padding: 15px; width: 280px; border-radius: 8px; border: none; font-size: 16px; margin-bottom: 15px; text-align: center; outline: none; }
+        
+        .auth-butonlar { display: flex; gap: 10px; margin-top: 10px; }
+        .btn-giris { background-color: #10b981; color: white; padding: 15px 30px; font-size: 15px; }
+        .btn-kayit { background-color: #475569; color: white; padding: 15px 30px; font-size: 15px; }
+        
+        #authMesaj { margin-top: 15px; color: #ef4444; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <!-- GİRİŞ EKRANI -->
+    <div id="girisEkrani">
+        <h2>İÇSEL MENTALİST</h2>
+        <input type="email" id="emailInput" placeholder="E-posta Adresi">
+        <input type="password" id="sifreInput" placeholder="Şifre">
+        
+        <div class="auth-butonlar">
+            <button class="btn-giris" onclick="kimlikIslemi('/giris_yap')">Giriş Yap</button>
+            <button class="btn-kayit" onclick="kimlikIslemi('/kayit_ol')">Kayıt Ol</button>
+        </div>
+        <div id="authMesaj"></div>
+    </div>
+
+    <!-- ANA UYGULAMA -->
+    <div class="container" id="anaUygulama" style="display: none;">
+        
+        <h1>İÇSEL MENTALİST</h1>
+        
+        <textarea id="gunlukMetni" placeholder="Günün nasıldı?"></textarea>
+        
+        <div class="button-group">
+            <div class="sol-butonlar">
+                <button class="btn-kaydet" onclick="kaydetTetikle()">KAYDET</button>
+                <button class="btn-cikis" onclick="cikisYap()">ÇIKIŞ YAP</button>
+                <span id="kayitMesaji" class="bilgi-mesaji">Kaydedildi.</span>
+            </div>
+            <button class="btn-analiz" onclick="genelAnalizTetikle()">BÜYÜK RESMİ ANALİZ ET</button>
+        </div>
+
+        <div id="sonucAlani" class="sonuc-kutusu">
+            <h3 style="color: white; margin-top: 0;">Zihinsel Örüntü Raporu</h3>
+            <p id="analizMetni" style="line-height: 1.8; color: #cbd5e1;"></p>
+        </div>
+    </div>
+
+    <div class="uyari-metni" id="footerUyari" style="display: none;">
+        ⚠️ Uyarı: Bu sistemdeki analizler Gemini API tarafından üretilmektedir ve hata/yanılsama içerebilir.
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const aktifId = localStorage.getItem("mentalist_user_id");
+            const aktifEmail = localStorage.getItem("mentalist_user_email");
+            if(aktifId && aktifEmail) { uygulamayiAc(); }
+        });
+
+        async function kimlikIslemi(endpoint) {
+            const email = document.getElementById('emailInput').value.trim();
+            const sifre = document.getElementById('sifreInput').value.trim();
+            const mesajKutusu = document.getElementById('authMesaj');
+
+            if(!email || !sifre) {
+                mesajKutusu.innerText = "Lütfen e-posta ve şifrenizi girin.";
+                return;
+            }
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email, sifre: sifre })
+                });
+
+                if(response.ok) {
+                    const data = await response.json();
+                    localStorage.setItem("mentalist_user_id", data.kullanici_id);
+                    localStorage.setItem("mentalist_user_email", data.email);
+                    mesajKutusu.innerText = "";
+                    
+                    document.getElementById('emailInput').value = "";
+                    document.getElementById('sifreInput').value = "";
+                    
+                    uygulamayiAc();
+                } else {
+                    const hata = await response.json();
+                    mesajKutusu.innerText = hata.detail;
+                }
+            } catch (err) {
+                mesajKutusu.innerText = "Sunucuya bağlanılamadı.";
+            }
+        }
+
+        function uygulamayiAc() {
+            document.getElementById('girisEkrani').style.display = 'none';
+            document.getElementById('anaUygulama').style.display = 'block';
+            document.getElementById('footerUyari').style.display = 'block';
+        }
+
+        function cikisYap() {
+            localStorage.removeItem("mentalist_user_id");
+            localStorage.removeItem("mentalist_user_email");
+            location.reload(); 
+        }
+
+        async function kaydetTetikle() {
+            const metin = document.getElementById('gunlukMetni').value;
+            const kullaniciId = localStorage.getItem("mentalist_user_id");
+            if (!metin.trim()) return;
+
+            fetch('/kaydet', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kullanici_id: parseInt(kullaniciId), metin: metin })
+            });
+
+            document.getElementById('gunlukMetni').value = "";
+            document.body.classList.remove("analiz-modu");
+            document.body.style.backgroundColor = "";
+            document.getElementById('sonucAlani').style.display = 'none';
+
+            const mesaj = document.getElementById('kayitMesaji');
+            mesaj.style.opacity = 1;
+            setTimeout(() => { mesaj.style.opacity = 0; }, 4000);
+        }
+
+        async function genelAnalizTetikle() {
+            const sonucKutusu = document.getElementById('sonucAlani');
+            const analizMetni = document.getElementById('analizMetni');
+            const kullaniciId = localStorage.getItem("mentalist_user_id");
+            
+            sonucKutusu.style.display = 'block';
+            analizMetni.innerHTML = "<em>Geçmiş içgörüler birleştiriliyor, ruh haline göre renk seçiliyor...</em>";
+
+            try {
+                const response = await fetch('/genel_analiz/' + kullaniciId);
+                const veri = await response.json();
+                
+                analizMetni.innerHTML = veri.analiz.replace(/\n/g, "<br>");
+                if(veri.renk) {
+                    document.body.classList.add("analiz-modu");
+                    document.body.style.backgroundColor = veri.renk;
+                }
+            } catch (hata) {
+                analizMetni.innerHTML = "<strong>Gemini şu an meşgul, lütfen birazdan tekrar dene.</strong>";
+            }
+        }
+    </script>
+</body>
+</html>
