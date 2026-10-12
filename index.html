@@ -49,7 +49,6 @@
         
         button { padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; border: none; }
 
-        /* TÜM BUTONLAR İÇİN ORTAK KAYDET TASARIMI */
         .btn-kaydet, .btn-cikis, .btn-analiz { 
             background-color: rgba(51, 65, 85, 0.9); 
             color: #f8fafc; 
@@ -63,7 +62,6 @@
         .sonuc-kutusu { background-color: rgba(30, 41, 59, 0.85); border-left: 4px solid #f8fafc; border-radius: 8px; padding: 20px; margin-top: 30px; display: none; backdrop-filter: blur(10px); }
         .uyari-metni { width: 100%; text-align: center; font-size: 12px; font-style: italic; color: #ef4444; padding: 20px 0; margin-top: 40px; }
 
-        /* GİRİŞ VE KAYIT EKRANI */
         #girisEkrani {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.95);
             z-index: 1000; display: flex; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(15px);
@@ -110,7 +108,7 @@
         </div>
 
         <div id="sonucAlani" class="sonuc-kutusu">
-            <h3 style="color: white; margin-top: 0;">Zihinsel Örüntü Raporu</h3>
+            <h3 style="color: white; margin-top: 0;">Günlük Analiz ve Rehberlik</h3>
             <p id="analizMetni" style="line-height: 1.8; color: #cbd5e1;"></p>
         </div>
     </div>
@@ -120,6 +118,16 @@
     </div>
 
     <script>
+        // Etiketlere göre arka plan renk paleti
+        const RENK_PALETI = {
+            "tukenmislik_hissi": "#1c1f24", "ofke_patlamalari": "#2e0f0f", "degersizlik_korkusu": "#101621",
+            "anksiyete_krizi": "#191c18", "yalnizlik_ve_izolasyon": "#151515", "onay_ihtiyaci": "#171523",
+            "yuzlesme_korkusu": "#221111", "sinir_koyamama": "#1a1e1a", "mukemmeliyetcilik": "#1f2022",
+            "zihinsel_asiri_yuklenme": "#161b22", "isyan_ve_haksizlik": "#2c1212", "varolus_sancisi_ve_anlam_arayisi": "#12151e",
+            "kurban_psikolojisi": "#1a1614", "kontrol_takintisi": "#17181c", "duygusal_bagimlilik": "#1d151c",
+            "olagan_bir_gun": "#0f172a"
+        };
+
         document.addEventListener("DOMContentLoaded", () => {
             const aktifId = localStorage.getItem("mentalist_user_id");
             const aktifEmail = localStorage.getItem("mentalist_user_email");
@@ -174,25 +182,55 @@
             location.reload(); 
         }
 
+        // DEĞİŞEN KISIM: KAYDET BUTONUNUN ÇIKTISI EKRANA YANSITILDI
         async function kaydetTetikle() {
             const metin = document.getElementById('gunlukMetni').value;
             const kullaniciId = localStorage.getItem("mentalist_user_id");
             if (!metin.trim()) return;
 
-            fetch('/kaydet', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ kullanici_id: parseInt(kullaniciId), metin: metin })
-            });
+            // Bekleme ekranını göster
+            const sonucKutusu = document.getElementById('sonucAlani');
+            const analizMetni = document.getElementById('analizMetni');
+            sonucKutusu.style.display = 'block';
+            analizMetni.innerHTML = "<em>Günlüğün inceleniyor ve sana özel kitap seçiliyor...</em>";
 
-            document.getElementById('gunlukMetni').value = "";
-            document.body.classList.remove("analiz-modu");
-            document.body.style.backgroundColor = "";
-            document.getElementById('sonucAlani').style.display = 'none';
+            try {
+                const response = await fetch('/kaydet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ kullanici_id: parseInt(kullaniciId), metin: metin })
+                });
 
-            const mesaj = document.getElementById('kayitMesaji');
-            mesaj.style.opacity = 1;
-            setTimeout(() => { mesaj.style.opacity = 0; }, 4000);
+                const veri = await response.json();
+
+                if(veri.durum === "basarili") {
+                    document.getElementById('gunlukMetni').value = "";
+                    
+                    const mesaj = document.getElementById('kayitMesaji');
+                    mesaj.style.opacity = 1;
+                    setTimeout(() => { mesaj.style.opacity = 0; }, 4000);
+
+                    // Etikete göre renk değişimi yap
+                    const etiket = veri.analiz.etiket;
+                    if(etiket && RENK_PALETI[etiket]) {
+                        document.body.classList.add("analiz-modu");
+                        document.body.style.backgroundColor = RENK_PALETI[etiket];
+                    }
+
+                    // 5 Sütun ve Kitap Önerisini ekrana yazdır
+                    let html = `<strong>Tetikleyici:</strong> ${veri.analiz.somut_tetikleyici_capasi}<br><br>`;
+                    html += `<strong>Duygu Çatışması:</strong> ${veri.analiz.vitrin_duygusu_vs_bastirilan_ihtiyac}<br><br>`;
+                    html += `<strong>Savunma Refleksi:</strong> ${veri.analiz.otomatik_savunma_kacis_refleksi}<br><br>`;
+                    
+                    if(veri.kitap_onerisi) {
+                        html += `<br><span style="color:#10b981; font-size:1.1em;">📚 <strong>Sana Özel Kitap Önerisi:</strong> ${veri.kitap_onerisi}</span>`;
+                    }
+                    
+                    analizMetni.innerHTML = html;
+                }
+            } catch (err) {
+                analizMetni.innerHTML = "<strong>Bir hata oluştu, lütfen tekrar dene.</strong>";
+            }
         }
 
         async function genelAnalizTetikle() {
@@ -201,7 +239,8 @@
             const kullaniciId = localStorage.getItem("mentalist_user_id");
             
             sonucKutusu.style.display = 'block';
-            analizMetni.innerHTML = "<em>Geçmiş içgörüler birleştiriliyor, ruh haline göre renk seçiliyor...</em>";
+            document.querySelector('#sonucAlani h3').innerText = "Büyük Resim Analizi";
+            analizMetni.innerHTML = "<em>Geçmiş içgörüler birleştiriliyor...</em>";
 
             try {
                 const response = await fetch('/genel_analiz/' + kullaniciId);
