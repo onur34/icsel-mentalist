@@ -3,24 +3,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr
 from typing import Literal
-import sqlite3
+import psycopg2
 import json
 import os
 import time
 import hashlib
 from datetime import datetime
+from dotenv import load_dotenv
 
 from google import genai
 from google.genai import types
 
-import os
-from dotenv import load_dotenv
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = FastAPI()
-
-load_dotenv() # .env dosyasındaki şifreleri gizlice okur
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 SISTEM_MESAJI_5_SUTUN = """Sen Mentalist'sin. Kullanıcı sana gün içinde parça parça yazdığı TÜM günlük metinlerinin birleştirilmiş halini verecek.
 Görev: Bu toplam bağlamı inceleyip, kullanıcının BUGÜNKÜ zihinsel haritasını tek bir 5 sütunda özetlemek.
@@ -80,7 +79,7 @@ def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
             raise e
 
 def get_db():
-    return sqlite3.connect("hafiza.db", timeout=15.0)
+    return psycopg2.connect(DATABASE_URL)
 
 def sifre_kriptola(sifre: str):
     return hashlib.sha256(sifre.encode()).hexdigest()
@@ -88,23 +87,22 @@ def sifre_kriptola(sifre: str):
 def init_db():
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
     
-    # 1. KULLANICILAR TABLOSU (ID, E-posta, Şifre)
+    # 1. KULLANICILAR TABLOSU (PostgreSQL'de ID SERIAL olur)
     cursor.execute('''CREATE TABLE IF NOT EXISTS kullanicilar (
-                      id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                      id SERIAL PRIMARY KEY, 
                       email TEXT UNIQUE, 
                       sifre TEXT)''')
 
-    # 2. GÜNLÜK METİNLER (Artık isim değil, kullanici_id tutuyor)
+    # 2. GÜNLÜK METİNLER
     cursor.execute('''CREATE TABLE IF NOT EXISTS gunluk_metinler (
-                      id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                      id SERIAL PRIMARY KEY, 
                       kullanici_id INTEGER, 
                       tarih TEXT, 
                       saat TEXT, 
                       metin TEXT)''')
 
-    # 3. İÇGÖRÜLER TABLOSU (Artık isim değil, kullanici_id tutuyor)
+    # 3. İÇGÖRÜLER TABLOSU
     cursor.execute('''CREATE TABLE IF NOT EXISTS gunluk_icgoruler (
                       kullanici_id INTEGER, 
                       tarih TEXT, 
@@ -120,27 +118,17 @@ def init_db():
 
 init_db()
 
-# --- VERİ DOĞRULAMA ŞEMALARI ---
 class GunlukIstegi(BaseModel):
     kullanici_id: int
     metin: str
 
 class KullaniciIstegi(BaseModel):
-    email: EmailStr  # E-posta formatını otomatik doğrular (abc@abc.com)
+    email: EmailStr
     sifre: str
 
 def robotik_dil_temizle(metin: str) -> str:
     if not isinstance(metin, str): return metin
     return metin.replace("Karakterin", "Senin").replace("Karakter", "Sen").replace("Kullanıcının", "Senin").replace("Kullanıcı", "Sen").replace("Yazar", "Sen")
-
-def kitapliktan_oner(etiket: str):
-    try:
-        if os.path.exists("kitaplik.json"):
-            with open("kitaplik.json", "r", encoding="utf-8") as f:
-                kitaplik = json.load(f)
-            return kitaplik.get(etiket.strip().lower(), {})
-        return {}
-    except: return {}
 
 @app.get("/")
 def ana_sayfa():
@@ -150,7 +138,6 @@ def ana_sayfa():
 def arka_plan_resmi():
     return FileResponse("patrick_jane.jpg") if os.path.exists("patrick_jane.jpg") else {"mesaj": "Resim bulunamadı."}
 
-# --- KAYIT OL ---
 @app.post("/kayit_ol")
 async def kayit_ol(istek: KullaniciIstegi):
     email = istek.email.strip().lower()
@@ -159,16 +146,17 @@ async def kayit_ol(istek: KullaniciIstegi):
     conn = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO kullanicilar (email, sifre) VALUES (?, ?)", (email, gizli_sifre))
-        yeni_id = cursor.lastrowid # Sistemin atadığı eşsiz ID numarasını al
+        # PostgreSQL'de insert edilen id'yi geri almak için RETURNING kullanılır ve ? yerine %s kullanılır
+        cursor.execute("INSERT INTO kullanicilar (email, sifre) VALUES (%s, %s) RETURNING id", (email, gizli_sifre))
+        yeni_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
         return {"durum": "basarili", "kullanici_id": yeni_id, "email": email}
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        conn.rollback()
         conn.close()
         raise HTTPException(status_code=400, detail="Bu e-posta adresi sistemde zaten kayıtlı!")
 
-# --- GİRİŞ YAP ---
 @app.post("/giris_yap")
 async def giris_yap(istek: KullaniciIstegi):
     email = istek.email.strip().lower()
@@ -176,7 +164,7 @@ async def giris_yap(istek: KullaniciIstegi):
     
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, email FROM kullanicilar WHERE email = ? AND sifre = ?", (email, gizli_sifre))
+    cursor.execute("SELECT id, email FROM kullanicilar WHERE email = %s AND sifre = %s", (email, gizli_sifre))
     kullanici = cursor.fetchone()
     conn.close()
 
@@ -185,7 +173,6 @@ async def giris_yap(istek: KullaniciIstegi):
         
     return {"durum": "basarili", "kullanici_id": kullanici[0], "email": kullanici[1]}
 
-# --- METİN KAYDET ---
 @app.post("/kaydet")
 async def kaydet(istek: GunlukIstegi):
     if not istek.metin or len(istek.metin.strip()) < 10:
@@ -198,14 +185,12 @@ async def kaydet(istek: GunlukIstegi):
         
         conn = get_db()
         cursor = conn.cursor()
-        # Metni SADECE O KULLANICI ID'siyle kaydet
-        cursor.execute("INSERT INTO gunluk_metinler (kullanici_id, tarih, saat, metin) VALUES (?, ?, ?, ?)", (kullanici_id, bugun, su_an, istek.metin))
+        cursor.execute("INSERT INTO gunluk_metinler (kullanici_id, tarih, saat, metin) VALUES (%s, %s, %s, %s)", (kullanici_id, bugun, su_an, istek.metin))
         
-        cursor.execute("SELECT saat, metin FROM gunluk_metinler WHERE tarih = ? AND kullanici_id = ?", (bugun, kullanici_id))
+        cursor.execute("SELECT saat, metin FROM gunluk_metinler WHERE tarih = %s AND kullanici_id = %s", (bugun, kullanici_id))
         bugunun_kayitlari = cursor.fetchall()
         conn.commit()
-        conn.close() 
-
+        
         birlestirilmis_metin = "\n\n".join([f"[{k[0]}] {k[1]}" for k in bugunun_kayitlari])
         
         response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
@@ -216,15 +201,12 @@ async def kaydet(istek: GunlukIstegi):
         if analiz.get("etiket", "").strip().lower() not in RENK_PALETI:
             analiz["etiket"] = "olagan_bir_gun"
 
-        conn = get_db()
-        cursor = conn.cursor()
-        # İçgörüyü SADECE O KULLANICI ID'si ile güncelle/ekle
-        cursor.execute("DELETE FROM gunluk_icgoruler WHERE tarih = ? AND kullanici_id = ?", (bugun, kullanici_id))
+        cursor.execute("DELETE FROM gunluk_icgoruler WHERE tarih = %s AND kullanici_id = %s", (bugun, kullanici_id))
         cursor.execute('''
             INSERT INTO gunluk_icgoruler (
                 kullanici_id, tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac,
                 otomatik_savunma_kacis_refleksi, bedensel_ve_enerji_izi, acikta_kalan_yarim_birakilan_dongu, etiket
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             kullanici_id, bugun, analiz.get("somut_tetikleyici_capasi", ""),
             analiz.get("vitrin_duygusu_vs_bastirilan_ihtiyac", ""), analiz.get("otomatik_savunma_kacis_refleksi", ""),
@@ -235,16 +217,14 @@ async def kaydet(istek: GunlukIstegi):
         conn.close()
         return {"durum": "basarili"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Gemini sunucuları meşgul.")
+        raise HTTPException(status_code=500, detail="Sunucu meşgul, lütfen tekrar dene.")
 
-# --- BÜYÜK RESMİ ANALİZ ET ---
 @app.get("/genel_analiz/{kullanici_id}")
 async def genel_analiz(kullanici_id: int):
     try:
         conn = get_db()
         cursor = conn.cursor()
-        # Büyük resmi çekerken SADECE GİRİŞ YAPAN KULLANICININ ID'sine sahip verileri al
-        cursor.execute("SELECT tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac, otomatik_savunma_kacis_refleksi, etiket FROM gunluk_icgoruler WHERE kullanici_id = ? ORDER BY tarih ASC", (kullanici_id,))
+        cursor.execute("SELECT tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac, otomatik_savunma_kacis_refleksi, etiket FROM gunluk_icgoruler WHERE kullanici_id = %s ORDER BY tarih ASC", (kullanici_id,))
         gecmis_veriler = cursor.fetchall()
         conn.close()
 
@@ -263,10 +243,6 @@ async def genel_analiz(kullanici_id: int):
         analiz_metni = robotik_dil_temizle(buyuk_resim_raporu.get("genel_analiz_metni", ""))
         arka_plan_rengi = RENK_PALETI.get(baskin_etiket, RENK_PALETI["varsayilan_karanlik"])
         
-        kitap = kitapliktan_oner(baskin_etiket)
-        if "kitap_adi" in kitap:
-            analiz_metni += f"\n\n<br>📖 <b>Mentalist'in Okuma Önerisi:</b> {kitap['kitap_adi']} - {kitap['yazar']}<br><i>Odaklanman gereken yer: {kitap['bolum']}</i><br><small>{kitap['aciklama']}</small>"
-
         return {"analiz": analiz_metni, "renk": arka_plan_rengi}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Gemini sunucuları meşgul.")
+        raise HTTPException(status_code=500, detail="Sunucu meşgul, lütfen tekrar dene.")

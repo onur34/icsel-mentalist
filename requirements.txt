@@ -3,3 +3,4 @@ uvicorn
 google-genai
 pydantic[email]
 python-dotenv
+psycopg2-binary
