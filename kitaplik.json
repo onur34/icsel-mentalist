@@ -1,0 +1,98 @@
+{
+  "tukenmislik_hissi": {
+    "kitap_adi": "Yorgunluk Toplumu",
+    "yazar": "Byung-Chul Han",
+    "bolum": "Performans Öznesi",
+    "aciklama": "Sürekli bir şeyler başarmak zorunda hissetmenin bedeninde ve zihninde yarattığı o ağır yorgunluğu açıklayabilmek için."
+  },
+  "ofke_patlamalari": {
+    "kitap_adi": "Şiddetsiz İletişim",
+    "yazar": "Marshall Rosenberg",
+    "bolum": "Duyguların Sorumluluğunu Almak",
+    "aciklama": "Küçük olaylara verdiğin büyük tepkilerin altında yatan asıl karşılanmamış ihtiyacını tespit edebilmen için."
+  },
+  "degersizlik_korkusu": {
+    "kitap_adi": "Öz Şefkat",
+    "yazar": "Kristin Neff",
+    "bolum": "Kendine İyi Davranmak",
+    "aciklama": "Kendine bir başkasına olduğundan çok daha acımasız davrandığını fark etmen ve içindeki eleştirmeni susturman için."
+  },
+  "anksiyete_krizi": {
+    "kitap_adi": "Yaratıcı Cesaret",
+    "yazar": "Rollo May",
+    "bolum": "Kaygı ve Değerler",
+    "aciklama": "Her şeyi kontrol edemeyeceğini kabullenip, belirsizliğin içindeki yaratıcı gücü keşfedebilmen için."
+  },
+  "yalnizlik_ve_izolasyon": {
+    "kitap_adi": "Bozkırkurdu",
+    "yazar": "Hermann Hesse",
+    "bolum": "Harry Haller'in Notları",
+    "aciklama": "Kalabalıklar içindeyken bile hissettiğin o derin anlaşılamama ve dünyaya ait olamama hissini kucaklayabilmen için."
+  },
+  "onay_ihtiyaci": {
+    "kitap_adi": "İçimizdeki Çocuk",
+    "yazar": "Doğan Cüceloğlu",
+    "bolum": "Bölüm 4: Başkalarının Gözüyle Yaşamak",
+    "aciklama": "Dış dünyanın beklentileriyle kendi gerçeğin arasındaki çatışmayı anlaman ve kendi iç sesine güvenmen için."
+  },
+  "yuzlesme_korkusu": {
+    "kitap_adi": "İçimizdeki Şeytan",
+    "yazar": "Sabahattin Ali",
+    "bolum": "Ömer'in İçsel Çatışmaları",
+    "aciklama": "İnsanın kendi zayıflıklarıyla ve karanlığıyla yüzleşmekten kaçışını kusursuz bir şekilde anlattığı için."
+  },
+  "sinir_koyamama": {
+    "kitap_adi": "Sınırlar",
+    "yazar": "Henry Cloud",
+    "bolum": "Bölüm 2: Sınırların İnşası",
+    "aciklama": "Hayır diyememenin getirdiği öfke ve tükenmişliği durdurup, sağlıklı duvarlar örebilmen için."
+  },
+  "mukemmeliyetcilik": {
+    "kitap_adi": "Gönül Bir Yeldeğirmenidir Sevda Öğütür",
+    "yazar": "Hüseyin Rahmi Gürpınar",
+    "bolum": "Toplum ve Birey Arasındaki Sıkışmışlık",
+    "aciklama": "Toplumun dayattığı kusursuzluk kalıplarına karşı bireyin kendi doğrularını bulma çabasına ışık tuttuğu için."
+  },
+  "zihinsel_asiri_yuklenme": {
+    "kitap_adi": "Dijital Minimalizm",
+    "yazar": "Cal Newport",
+    "bolum": "Bölüm 3: Yalnızlık",
+    "aciklama": "Zihninin maruz kaldığı aşırı uyaran gürültüsünü susturup kendi iç sesine alan açman için."
+  },
+  "isyan_ve_haksizlik": {
+    "kitap_adi": "İnce Memed",
+    "yazar": "Yaşar Kemal",
+    "bolum": "Abdi Ağa'ya Başkaldırı",
+    "aciklama": "İçinde biriken haksızlığa uğrama hissine ve boyun eğmeme dürtüsüne edebi bir ayna tuttuğu için."
+  },
+  "varolus_sancisi_ve_anlam_arayisi": {
+    "kitap_adi": "Yaşamak",
+    "yazar": "Cahit Zarifoğlu",
+    "bolum": "İçsel Günlükler",
+    "aciklama": "Hayatın sıradanlığı içinde anlam ararken yaşanan o derin ruhsal sıkışmayı ve iç döküşü anlattığı için."
+  },
+  "kurban_psikolojisi": {
+    "kitap_adi": "İnsanın Anlam Arayışı",
+    "yazar": "Viktor E. Frankl",
+    "bolum": "Toplama Kampında Logoterapi",
+    "aciklama": "Olaylar ne kadar ağır olursa olsun, o olaylara vereceğin tepkiyi seçme özgürlüğünün her zaman sende olduğunu hatırlaman için."
+  },
+  "kontrol_takintisi": {
+    "kitap_adi": "Kendime Düşünceler",
+    "yazar": "Marcus Aurelius",
+    "bolum": "İçsel Kale",
+    "aciklama": "Sadece kendi düşünce ve eylemlerine hükmedebileceğini, dış dünyayı kontrol etmeye çalışmanın boşa kürek çekmek olduğunu kavramak için."
+  },
+  "duygusal_bagimlilik": {
+    "kitap_adi": "Sevme Sanatı",
+    "yazar": "Erich Fromm",
+    "bolum": "Sevgi ve Ayrılık",
+    "aciklama": "Başkalarına tutunma ihtiyacının aslında kendi yalnızlığından kaçış olduğunu gösterip, sağlıklı bir bağımsızlık kurman için."
+  },
+  "olagan_bir_gun": {
+    "kitap_adi": "Şimdi'nin Gücü",
+    "yazar": "Eckhart Tolle",
+    "bolum": "Sakinlik ve Varlık",
+    "aciklama": "Bugün zihninde fırtınalar kopmuyor. Bu dinginliğin tadını çıkar ve sadece 'şu an'da kalmaya odaklan."
+  }
+}
