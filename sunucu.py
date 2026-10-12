@@ -21,13 +21,20 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = FastAPI()
 
-kitaplik_verisi = []
+# 1. DÜZELTME: Kitaplık verisini etiket eşleştirmesi için sözlük (dict) formatında güvenle yüklüyoruz
+kitaplik_verisi = {}
 if os.path.exists("kitaplik.json"):
     try:
         with open("kitaplik.json", "r", encoding="utf-8") as f:
-            kitaplik_verisi = json.load(f)
+            veri = json.load(f)
+            if isinstance(veri, dict):
+                kitaplik_verisi = veri
+            elif isinstance(veri, list):
+                for oge in veri:
+                    if isinstance(oge, dict) and "etiket" in oge and "kitap" in oge:
+                        kitaplik_verisi[oge["etiket"]] = oge["kitap"]
     except Exception:
-        kitaplik_verisi = []
+        kitaplik_verisi = {}
 
 SISTEM_MESAJI_5_SUTUN = """Sen Mentalist'sin. Kullanıcı sana gün içinde parça parça yazdığı TÜM günlük metinlerinin birleştirilmiş halini verecek.
 Görev: Bu toplam bağlamı inceleyip, kullanıcının BUGÜNKÜ zihinsel haritasını tek bir 5 sütunda özetlemek.
@@ -75,7 +82,7 @@ def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
     for i in range(deneme_sayisi):
         try:
             return client.models.generate_content(
-                model='gemini-3.5-flash', 
+                model='gemini-2.5-flash', 
                 contents=icerik_metni,
                 config=types.GenerateContentConfig(system_instruction=sistem_mesaji, temperature=0.0, top_k=1, response_mime_type="application/json", response_schema=sema)
             )
@@ -96,13 +103,11 @@ def init_db():
     conn = get_db()
     cursor = conn.cursor()
     
-    # 1. KULLANICILAR TABLOSU (PostgreSQL'de ID SERIAL olur)
     cursor.execute('''CREATE TABLE IF NOT EXISTS kullanicilar (
                       id SERIAL PRIMARY KEY, 
                       email TEXT UNIQUE, 
                       sifre TEXT)''')
 
-    # 2. GÜNLÜK METİNLER
     cursor.execute('''CREATE TABLE IF NOT EXISTS gunluk_metinler (
                       id SERIAL PRIMARY KEY, 
                       kullanici_id INTEGER, 
@@ -110,7 +115,6 @@ def init_db():
                       saat TEXT, 
                       metin TEXT)''')
 
-    # 3. İÇGÖRÜLER TABLOSU
     cursor.execute('''CREATE TABLE IF NOT EXISTS gunluk_icgoruler (
                       kullanici_id INTEGER, 
                       tarih TEXT, 
@@ -154,7 +158,6 @@ async def kayit_ol(istek: KullaniciIstegi):
     conn = get_db()
     cursor = conn.cursor()
     try:
-        # PostgreSQL'de insert edilen id'yi geri almak için RETURNING kullanılır ve ? yerine %s kullanılır
         cursor.execute("INSERT INTO kullanicilar (email, sifre) VALUES (%s, %s) RETURNING id", (email, gizli_sifre))
         yeni_id = cursor.fetchone()[0]
         conn.commit()
@@ -204,10 +207,16 @@ async def kaydet(istek: GunlukIstegi):
         response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
         analiz = json.loads(response.text)
         
+        # 2. DÜZELTME: Gelen etiketi alıp kitaplık dosyasından ilgili kitabı buluyoruz
+        etiket = analiz.get("etiket", "olagan_bir_gun").strip().lower()
+        if etiket not in RENK_PALETI:
+            etiket = "olagan_bir_gun"
+            analiz["etiket"] = etiket
+            
+        kitap_onerisi = kitaplik_verisi.get(etiket, "")
+
         for anahtar, deger in analiz.items():
             if anahtar != "etiket": analiz[anahtar] = robotik_dil_temizle(deger)
-        if analiz.get("etiket", "").strip().lower() not in RENK_PALETI:
-            analiz["etiket"] = "olagan_bir_gun"
 
         cursor.execute("DELETE FROM gunluk_icgoruler WHERE tarih = %s AND kullanici_id = %s", (bugun, kullanici_id))
         cursor.execute('''
@@ -218,12 +227,17 @@ async def kaydet(istek: GunlukIstegi):
         ''', (
             kullanici_id, bugun, analiz.get("somut_tetikleyici_capasi", ""),
             analiz.get("vitrin_duygusu_vs_bastirilan_ihtiyac", ""), analiz.get("otomatik_savunma_kacis_refleksi", ""),
-            analiz.get("bedensel_ve_enerji_izi", ""), analiz.get("acikta_kalan_yarim_birakilan_dongu", ""),
-            analiz.get("etiket", "")
+            analiz.get("bedensel_ve_enerji_izi", ""), analiz.get("acikta_kalan_yarim_birakilan_dongu", ""), etiket
         ))
         conn.commit()
         conn.close()
-        return {"durum": "basarili"}
+        
+        # 3. DÜZELTME: Bulunan kitabı arayüze iletiyoruz
+        return {
+            "durum": "basarili", 
+            "analiz": analiz,
+            "kitap_onerisi": kitap_onerisi
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail="Sunucu meşgul, lütfen tekrar dene.")
 
