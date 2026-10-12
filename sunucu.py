@@ -82,7 +82,7 @@ def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
     for i in range(deneme_sayisi):
         try:
             return client.models.generate_content(
-                model='gemini-2.5-flash', # ÇÖZÜM 1: Model adı düzeltildi
+                model='gemini-3.8-flash', # ÇÖZÜM 1: Model adı düzeltildi
                 contents=icerik_metni,
                 config=types.GenerateContentConfig(system_instruction=sistem_mesaji, temperature=0.0, top_k=1, response_mime_type="application/json", response_schema=sema)
             )
