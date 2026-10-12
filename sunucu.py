@@ -21,21 +21,6 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = FastAPI()
 
-# Kitaplık eşleştirmesi için veriyi sözlük (dict) formatında yüklüyoruz
-kitaplik_verisi = {}
-if os.path.exists("kitaplik.json"):
-    try:
-        with open("kitaplik.json", "r", encoding="utf-8") as f:
-            veri = json.load(f)
-            if isinstance(veri, dict):
-                kitaplik_verisi = veri
-            elif isinstance(veri, list):
-                for oge in veri:
-                    if isinstance(oge, dict) and "etiket" in oge and "kitap" in oge:
-                        kitaplik_verisi[oge["etiket"]] = oge["kitap"]
-    except Exception:
-        kitaplik_verisi = {}
-
 SISTEM_MESAJI_5_SUTUN = """Sen Mentalist'sin. Kullanıcı sana gün içinde parça parça yazdığı TÜM günlük metinlerinin birleştirilmiş halini verecek.
 Görev: Bu toplam bağlamı inceleyip, kullanıcının BUGÜNKÜ zihinsel haritasını tek bir 5 sütunda özetlemek.
 ÇOK ÖNEMLİ KURAL: Her sütunu MAKSİMUM 1 VEYA 2 CÜMLE ile, nokta atışı ve çok kısa yaz.
@@ -82,7 +67,7 @@ def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
     for i in range(deneme_sayisi):
         try:
             return client.models.generate_content(
-                model='gemini-3.8-flash', # ÇÖZÜM 1: Model adı düzeltildi
+                model='gemini-1.5-flash', 
                 contents=icerik_metni,
                 config=types.GenerateContentConfig(system_instruction=sistem_mesaji, temperature=0.0, top_k=1, response_mime_type="application/json", response_schema=sema)
             )
@@ -91,7 +76,7 @@ def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
                 if i < deneme_sayisi - 1:
                     time.sleep(3)
                     continue
-            print(f"Gerçek Hata: {e}") # Log ekranında asıl hatayı görmek için eklendi
+            print(f"Gerçek Hata: {e}")
             raise e
 
 def get_db():
@@ -208,16 +193,10 @@ async def kaydet(istek: GunlukIstegi):
         response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
         analiz = json.loads(response.text)
         
-        # ÇÖZÜM 2: Etiketi alıp JSON listesinden kitap önerisi eşleştiriliyor
-        etiket = analiz.get("etiket", "olagan_bir_gun").strip().lower()
-        if etiket not in RENK_PALETI:
-            etiket = "olagan_bir_gun"
-            analiz["etiket"] = etiket
-            
-        kitap_onerisi = kitaplik_verisi.get(etiket, "")
-
         for anahtar, deger in analiz.items():
             if anahtar != "etiket": analiz[anahtar] = robotik_dil_temizle(deger)
+        if analiz.get("etiket", "").strip().lower() not in RENK_PALETI:
+            analiz["etiket"] = "olagan_bir_gun"
 
         cursor.execute("DELETE FROM gunluk_icgoruler WHERE tarih = %s AND kullanici_id = %s", (bugun, kullanici_id))
         cursor.execute('''
@@ -228,17 +207,14 @@ async def kaydet(istek: GunlukIstegi):
         ''', (
             kullanici_id, bugun, analiz.get("somut_tetikleyici_capasi", ""),
             analiz.get("vitrin_duygusu_vs_bastirilan_ihtiyac", ""), analiz.get("otomatik_savunma_kacis_refleksi", ""),
-            analiz.get("bedensel_ve_enerji_izi", ""), analiz.get("acikta_kalan_yarim_birakilan_dongu", ""), etiket
+            analiz.get("bedensel_ve_enerji_izi", ""), analiz.get("acikta_kalan_yarim_birakilan_dongu", ""),
+            analiz.get("etiket", "")
         ))
         conn.commit()
         conn.close()
         
-        # Arayüze kitabı da gönderiyoruz
-        return {
-            "durum": "basarili", 
-            "analiz": analiz,
-            "kitap_onerisi": kitap_onerisi
-        }
+        # ESKİ HALİ: Ekrana çıktı vermez, sadece başarılı döndürür
+        return {"durum": "basarili"}
     except Exception as e:
         raise HTTPException(status_code=500, detail="Sunucu meşgul, lütfen tekrar dene.")
 
