@@ -21,6 +21,14 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = FastAPI()
 
+kitaplik_verisi = []
+if os.path.exists("kitaplik.json"):
+    try:
+        with open("kitaplik.json", "r", encoding="utf-8") as f:
+            kitaplik_verisi = json.load(f)
+    except Exception:
+        kitaplik_verisi = []
+
 SISTEM_MESAJI_5_SUTUN = """Sen Mentalist'sin. Kullanıcı sana gün içinde parça parça yazdığı TÜM günlük metinlerinin birleştirilmiş halini verecek.
 Görev: Bu toplam bağlamı inceleyip, kullanıcının BUGÜNKÜ zihinsel haritasını tek bir 5 sütunda özetlemek.
 ÇOK ÖNEMLİ KURAL: Her sütunu MAKSİMUM 1 VEYA 2 CÜMLE ile, nokta atışı ve çok kısa yaz.
