@@ -131,6 +131,21 @@
         #analizMetni { margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.85; color: #3F5A43; white-space: pre-wrap; }
         #analizMetni.yukleniyor { font-style: italic; color: var(--metin-soluk); }
 
+        .kitap-karti {
+            display: none;
+            margin-top: 20px;
+            padding: 16px 18px;
+            background: #EEF4EA;
+            border: 1px solid var(--kenar);
+            border-radius: 12px;
+            color: #2F4A33;
+        }
+        .kitap-baslik { margin: 0 0 6px; font-size: 13px; color: #5F7D60; }
+        .kitap-adi { margin: 0; font-family: var(--serif); font-size: 18px; font-weight: 500; color: #2F4A33; }
+        .kitap-yazar { margin: 2px 0 0; font-size: 14px; color: #5F7D60; }
+        .kitap-bolum { margin: 2px 0 0; font-size: 13px; color: #5F7D60; }
+        .kitap-aciklama { margin: 10px 0 0; font-family: var(--serif); font-size: 15px; line-height: 1.7; color: #3F5A43; }
+
         .uyari-metni { width: 100%; text-align: center; font-size: 12px; line-height: 1.5; color: var(--metin-soluk); padding: 20px; margin-top: 40px; transition: color 1.5s ease; }
 
         #girisEkrani {
@@ -229,6 +244,14 @@
         <div id="sonucAlani" class="sonuc-kutusu">
             <h3>Zihinsel örüntü raporu</h3>
             <p id="analizMetni"></p>
+
+            <div class="kitap-karti" id="kitapOnerisi">
+                <p class="kitap-baslik">Sana bir kitap önerisi</p>
+                <p class="kitap-adi" id="kitapAdi"></p>
+                <p class="kitap-yazar" id="kitapYazar"></p>
+                <p class="kitap-bolum" id="kitapBolum"></p>
+                <p class="kitap-aciklama" id="kitapAciklama"></p>
+            </div>
         </div>
     </div>
 
@@ -397,6 +420,7 @@
             analizMetni.classList.add('yukleniyor');
             analizMetni.textContent = "Geçmiş yazıların bir araya getiriliyor, ruh haline uygun bir renk seçiliyor…";
             buton.disabled = true;
+            document.getElementById('kitapOnerisi').style.display = 'none';
 
             try {
                 const response = await fetch('/genel_analiz/' + kullaniciId);
@@ -404,6 +428,14 @@
 
                 analizMetni.classList.remove('yukleniyor');
                 analizMetni.textContent = veri.analiz;
+
+                if (veri.kitap) {
+                    document.getElementById('kitapAdi').textContent = veri.kitap.kitap_adi;
+                    document.getElementById('kitapYazar').textContent = veri.kitap.yazar;
+                    document.getElementById('kitapBolum').textContent = veri.kitap.bolum ? "Bölüm: " + veri.kitap.bolum : "";
+                    document.getElementById('kitapAciklama').textContent = veri.kitap.aciklama;
+                    document.getElementById('kitapOnerisi').style.display = 'block';
+                }
 
                 if (veri.renk) {
                     const koyu = renkKoyuMu(veri.renk);
