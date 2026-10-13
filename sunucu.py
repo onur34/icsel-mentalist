@@ -71,21 +71,29 @@ except FileNotFoundError:
     print("UYARI: kitaplik.json bulunamadı, kitap önerisi verilmeyecek.")
     KITAPLIK = {}
 
-def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
-    for i in range(deneme_sayisi):
-        try:
-            return client.models.generate_content(
-                model='gemini-3.8-flash', 
-                contents=icerik_metni,
-                config=types.GenerateContentConfig(system_instruction=sistem_mesaji, temperature=0.0, top_k=1, response_mime_type="application/json", response_schema=sema)
-            )
-        except Exception as e:
-            if "503" in str(e) or "UNAVAILABLE" in str(e):
-                if i < deneme_sayisi - 1:
-                    time.sleep(3)
+MODEL_ADI = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+YEDEK_MODEL = os.getenv("GEMINI_YEDEK_MODEL")
+
+def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=4):
+    modeller = [MODEL_ADI] + ([YEDEK_MODEL] if YEDEK_MODEL else [])
+    son_hata = None
+    for model in modeller:
+        for i in range(deneme_sayisi):
+            try:
+                return client.models.generate_content(
+                    model=model,
+                    contents=icerik_metni,
+                    config=types.GenerateContentConfig(system_instruction=sistem_mesaji, temperature=0.0, top_k=1, response_mime_type="application/json", response_schema=sema)
+                )
+            except Exception as e:
+                son_hata = e
+                gecici = "503" in str(e) or "UNAVAILABLE" in str(e) or "429" in str(e)
+                print(f"Gemini hatası ({model}, deneme {i + 1}/{deneme_sayisi}): {e}")
+                if gecici and i < deneme_sayisi - 1:
+                    time.sleep(2 * (2 ** i))
                     continue
-            print(f"Gerçek Hata: {e}")
-            raise e
+                break
+    raise son_hata
 
 def get_db():
     return psycopg2.connect(DATABASE_URL)
@@ -179,7 +187,7 @@ async def giris_yap(istek: KullaniciIstegi):
     return {"durum": "basarili", "kullanici_id": kullanici[0], "email": kullanici[1]}
 
 @app.post("/kaydet")
-async def kaydet(istek: GunlukIstegi):
+def kaydet(istek: GunlukIstegi):
     if not istek.metin or len(istek.metin.strip()) < 10:
         raise HTTPException(status_code=400, detail="Metin çok kısa.")
 
@@ -198,8 +206,13 @@ async def kaydet(istek: GunlukIstegi):
         
         birlestirilmis_metin = "\n\n".join([f"[{k[0]}] {k[1]}" for k in bugunun_kayitlari])
         
-        response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
-        analiz = json.loads(response.text)
+        try:
+            response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
+            analiz = json.loads(response.text)
+        except Exception as e:
+            print(f"Günlük kaydedildi ama analiz yapılamadı: {e}")
+            conn.close()
+            return {"durum": "basarili", "analiz": "ertelendi"}
         
         for anahtar, deger in analiz.items():
             if anahtar != "etiket": analiz[anahtar] = robotik_dil_temizle(deger)
@@ -227,7 +240,7 @@ async def kaydet(istek: GunlukIstegi):
         raise HTTPException(status_code=500, detail="Sunucu meşgul, lütfen tekrar dene.")
 
 @app.get("/genel_analiz/{kullanici_id}")
-async def genel_analiz(kullanici_id: int):
+def genel_analiz(kullanici_id: int):
     try:
         conn = get_db()
         cursor = conn.cursor()
@@ -242,8 +255,17 @@ async def genel_analiz(kullanici_id: int):
         for v in gecmis_veriler:
             analiz_gecmisi_metni += f"Tarih: {v[0]} | Tetikleyici: {v[1]} | Duygu Çatışması: {v[2]} | Savunma: {v[3]} | Etiket: {v[4]}\n"
 
-        response = gemini_istek_at(analiz_gecmisi_metni, SISTEM_MESAJI_BUYUK_RESIM, BuyukResimAnaliz)
-        buyuk_resim_raporu = json.loads(response.text)
+        yedek_mod = False
+        try:
+            response = gemini_istek_at(analiz_gecmisi_metni, SISTEM_MESAJI_BUYUK_RESIM, BuyukResimAnaliz)
+            buyuk_resim_raporu = json.loads(response.text)
+        except Exception as e:
+            print(f"Büyük resim analizi yapılamadı, yedek moda geçildi: {e}")
+            yedek_mod = True
+            buyuk_resim_raporu = {
+                "genel_analiz_metni": "Yapay zekâ şu an çok yoğun olduğu için ayrıntılı raporu hazırlayamadım. Son kaydına göre sana bir renk ve kitap seçtim. Birazdan tekrar deneyebilirsin.",
+                "baskin_etiket": gecmis_veriler[-1][4] or "olagan_bir_gun",
+            }
         baskin_etiket = buyuk_resim_raporu.get("baskin_etiket", "").strip().lower()
         if baskin_etiket not in RENK_PALETI: baskin_etiket = "olagan_bir_gun"
 
@@ -252,6 +274,6 @@ async def genel_analiz(kullanici_id: int):
         
         kitap_onerisi = KITAPLIK.get(baskin_etiket)
 
-        return {"analiz": analiz_metni, "renk": arka_plan_rengi, "kitap": kitap_onerisi}
+        return {"analiz": analiz_metni, "renk": arka_plan_rengi, "kitap": kitap_onerisi, "yedek": yedek_mod}
     except Exception as e:
         raise HTTPException(status_code=500, detail="Sunucu meşgul, lütfen tekrar dene.")
