@@ -72,26 +72,93 @@ except FileNotFoundError:
     KITAPLIK = {}
 
 MODEL_ADI = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-YEDEK_MODEL = os.getenv("GEMINI_YEDEK_MODEL")
+# Virgülle ayrılmış yedek model listesi. Örn: GEMINI_YEDEK_MODELLER=model-a,model-b
+YEDEK_MODELLER = [m.strip() for m in (os.getenv("GEMINI_YEDEK_MODELLER") or os.getenv("GEMINI_YEDEK_MODEL") or "").split(",") if m.strip()]
+# 1 ise, listede olmayan ama hesabında kullanılabilen "flash" modelleri de son çare olarak denenir
+OTOMATIK_YEDEK = os.getenv("GEMINI_OTOMATIK_YEDEK", "1") == "1"
+MAKS_MODEL_SAYISI = 5
 
-def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=4):
-    modeller = [MODEL_ADI] + ([YEDEK_MODEL] if YEDEK_MODEL else [])
+_bloklu_modeller = {}  # model -> tekrar denenebileceği zaman (epoch saniye)
+_kesfedilen = {"zaman": 0, "liste": []}
+
+def _model_blokla(model, saniye):
+    _bloklu_modeller[model] = time.time() + saniye
+
+def _model_bloklu_mu(model):
+    return _bloklu_modeller.get(model, 0) > time.time()
+
+def kesfedilen_modeller():
+    """Hesapta kullanılabilen metin modellerini (flash ailesi) bulur, 6 saat önbellekte tutar."""
+    if time.time() - _kesfedilen["zaman"] < 6 * 3600:
+        return _kesfedilen["liste"]
+    _kesfedilen["zaman"] = time.time()
+    try:
+        adaylar = []
+        yasakli = ("image", "tts", "audio", "live", "embedding", "robotics", "computer", "native", "exp", "vision")
+        for m in client.models.list():
+            ad = m.name.replace("models/", "")
+            eylemler = getattr(m, "supported_actions", None) or []
+            if eylemler and "generateContent" not in eylemler:
+                continue
+            kucuk = ad.lower()
+            if "flash" not in kucuk or any(k in kucuk for k in yasakli):
+                continue
+            adaylar.append(ad)
+        adaylar.sort(reverse=True)                      # yeni sürümler önde
+        adaylar.sort(key=lambda a: "lite" in a.lower()) # lite modeller en sonda
+        _kesfedilen["liste"] = adaylar
+    except Exception as e:
+        print(f"Model listesi alınamadı: {e}")
+    return _kesfedilen["liste"]
+
+def model_zinciri():
+    zincir = []
+    for m in [MODEL_ADI] + YEDEK_MODELLER + (kesfedilen_modeller() if OTOMATIK_YEDEK else []):
+        if m not in zincir:
+            zincir.append(m)
+    return zincir
+
+def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
+    tum_zincir = model_zinciri()
+    zincir = [m for m in tum_zincir if not _model_bloklu_mu(m)][:MAKS_MODEL_SAYISI]
+    if not zincir:
+        raise RuntimeError("429 RESOURCE_EXHAUSTED: Tüm modellerin kotası dolu ya da modellere ulaşılamıyor.")
+
     son_hata = None
-    for model in modeller:
-        for i in range(deneme_sayisi):
+    for model in zincir:
+        deneme = deneme_sayisi if model == MODEL_ADI else 2
+        for i in range(deneme):
             try:
-                return client.models.generate_content(
+                yanit = client.models.generate_content(
                     model=model,
                     contents=icerik_metni,
                     config=types.GenerateContentConfig(system_instruction=sistem_mesaji, temperature=0.0, top_k=1, response_mime_type="application/json", response_schema=sema)
                 )
+                if model != MODEL_ADI:
+                    print(f"Yedek model kullanıldı: {model}")
+                return yanit
             except Exception as e:
                 son_hata = e
-                gecici = "503" in str(e) or "UNAVAILABLE" in str(e) or "429" in str(e)
-                print(f"Gemini hatası ({model}, deneme {i + 1}/{deneme_sayisi}): {e}")
-                if gecici and i < deneme_sayisi - 1:
+                hata = str(e)
+                print(f"Gemini hatası ({model}, deneme {i + 1}/{deneme}): {hata[:300]}")
+
+                gunluk_kota = "429" in hata and "PerDay" in hata
+                gecici = ("503" in hata or "UNAVAILABLE" in hata or "429" in hata) and not gunluk_kota
+
+                if gunluk_kota:
+                    _model_blokla(model, 30 * 60)       # kota dolu: 30 dk atla
+                    break
+                if "404" in hata or "NOT_FOUND" in hata:
+                    _model_blokla(model, 24 * 3600)     # model yok: sunucu yeniden başlayana dek atla
+                    break
+                if "400" in hata or "INVALID_ARGUMENT" in hata:
+                    _model_blokla(model, 10 * 60)       # bu model isteği/şemayı desteklemiyor olabilir
+                    break
+                if gecici and i < deneme - 1:
                     time.sleep(2 * (2 ** i))
                     continue
+                if gecici:
+                    _model_blokla(model, 30)            # yoğunluk: kısa süre atla
                 break
     raise son_hata
 
@@ -127,6 +194,12 @@ def init_db():
                       acikta_kalan_yarim_birakilan_dongu TEXT, 
                       etiket TEXT,
                       PRIMARY KEY (kullanici_id, tarih))''')
+
+    cursor.execute('''CREATE TABLE IF NOT EXISTS genel_analiz_onbellek (
+                      kullanici_id INTEGER PRIMARY KEY,
+                      imza TEXT,
+                      analiz TEXT,
+                      etiket TEXT)''')
     conn.commit()
     conn.close()
 
@@ -259,17 +332,53 @@ def genel_analiz(kullanici_id: int):
         for v in gecmis_veriler:
             analiz_gecmisi_metni += f"Tarih: {v[0]} | Tetikleyici: {v[1]} | Duygu Çatışması: {v[2]} | Savunma: {v[3]} | Etiket: {v[4]}\n"
 
+        # Veriler değişmediyse Gemini'yi tekrar çağırma: kayıtlı raporu göster (kota ve süre tasarrufu)
+        imza = hashlib.sha256(analiz_gecmisi_metni.encode()).hexdigest()
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT imza, analiz, etiket FROM genel_analiz_onbellek WHERE kullanici_id = %s", (kullanici_id,))
+        onbellek = cursor.fetchone()
+        conn.close()
+
+        if onbellek and onbellek[0] == imza:
+            etiket = onbellek[2] if onbellek[2] in RENK_PALETI else "olagan_bir_gun"
+            return {"analiz": onbellek[1], "renk": RENK_PALETI[etiket], "kitap": KITAPLIK.get(etiket), "yedek": False}
+
         yedek_mod = False
         try:
             response = gemini_istek_at(analiz_gecmisi_metni, SISTEM_MESAJI_BUYUK_RESIM, BuyukResimAnaliz)
             buyuk_resim_raporu = json.loads(response.text)
+
+            temiz_etiket = buyuk_resim_raporu.get("baskin_etiket", "").strip().lower()
+            if temiz_etiket not in RENK_PALETI: temiz_etiket = "olagan_bir_gun"
+            temiz_metin = robotik_dil_temizle(buyuk_resim_raporu.get("genel_analiz_metni", ""))
+
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('''INSERT INTO genel_analiz_onbellek (kullanici_id, imza, analiz, etiket)
+                              VALUES (%s, %s, %s, %s)
+                              ON CONFLICT (kullanici_id) DO UPDATE
+                              SET imza = EXCLUDED.imza, analiz = EXCLUDED.analiz, etiket = EXCLUDED.etiket''',
+                           (kullanici_id, imza, temiz_metin, temiz_etiket))
+            conn.commit()
+            conn.close()
         except Exception as e:
             print(f"Büyük resim analizi yapılamadı, yedek moda geçildi: {e}")
             yedek_mod = True
-            buyuk_resim_raporu = {
-                "genel_analiz_metni": "Yapay zekâ şu an çok yoğun olduğu için ayrıntılı raporu hazırlayamadım. Son kaydına göre sana bir renk ve kitap seçtim. Birazdan tekrar deneyebilirsin.",
-                "baskin_etiket": gecmis_veriler[-1][4] or "olagan_bir_gun",
-            }
+            kota_doldu = "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e)
+
+            if onbellek:
+                # Eski ama gerçek bir rapor varsa onu göster
+                buyuk_resim_raporu = {
+                    "genel_analiz_metni": onbellek[1] + "\n\n(Not: Yapay zekâ şu an yeni rapor üretemediği için en son hazırlanan rapor gösteriliyor.)",
+                    "baskin_etiket": onbellek[2] or "olagan_bir_gun",
+                }
+            else:
+                neden = ("Yapay zekâ servisinin günlük kullanım sınırı doldu" if kota_doldu else "Yapay zekâ şu an çok yoğun")
+                buyuk_resim_raporu = {
+                    "genel_analiz_metni": neden + ", bu yüzden ayrıntılı raporu hazırlayamadım. Son kaydına göre sana bir renk ve kitap seçtim. Daha sonra tekrar deneyebilirsin.",
+                    "baskin_etiket": gecmis_veriler[-1][4] or "olagan_bir_gun",
+                }
         baskin_etiket = buyuk_resim_raporu.get("baskin_etiket", "").strip().lower()
         if baskin_etiket not in RENK_PALETI: baskin_etiket = "olagan_bir_gun"
 
