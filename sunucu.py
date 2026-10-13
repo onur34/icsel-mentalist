@@ -291,6 +291,40 @@ async def giris_yap(istek: KullaniciIstegi):
 
     return {"durum": "basarili", "kullanici_id": kullanici[0], "email": kullanici[1], "ad": kullanici[2] or ""}
 
+def gunluk_icgorusu_uret(kullanici_id: int, bugun: str):
+    """Arka planda çalışır: günün tüm metinlerini birleştirip Gemini ile 5 sütunluk içgörü üretir."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT saat, metin FROM gunluk_metinler WHERE tarih = %s AND kullanici_id = %s ORDER BY saat ASC", (bugun, kullanici_id))
+        bugunun_kayitlari = cursor.fetchall()
+        birlestirilmis_metin = "\n\n".join([f"[{k[0]}] {k[1]}" for k in bugunun_kayitlari])
+
+        response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
+        analiz = json.loads(response.text)
+
+        for anahtar, deger in analiz.items():
+            if anahtar != "etiket": analiz[anahtar] = robotik_dil_temizle(deger)
+        if analiz.get("etiket", "").strip().lower() not in RENK_PALETI:
+            analiz["etiket"] = "olagan_bir_gun"
+
+        cursor.execute("DELETE FROM gunluk_icgoruler WHERE tarih = %s AND kullanici_id = %s", (bugun, kullanici_id))
+        cursor.execute('''
+            INSERT INTO gunluk_icgoruler (
+                kullanici_id, tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac,
+                otomatik_savunma_kacis_refleksi, bedensel_ve_enerji_izi, acikta_kalan_yarim_birakilan_dongu, etiket
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            kullanici_id, bugun, analiz.get("somut_tetikleyici_capasi", ""),
+            analiz.get("vitrin_duygusu_vs_bastirilan_ihtiyac", ""), analiz.get("otomatik_savunma_kacis_refleksi", ""),
+            analiz.get("bedensel_ve_enerji_izi", ""), analiz.get("acikta_kalan_yarim_birakilan_dongu", ""),
+            analiz.get("etiket", "")
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Günlük içgörü arka planda üretilemedi: {e}")
+
 @app.post("/kaydet")
 def kaydet(istek: GunlukIstegi, arka_plan: BackgroundTasks):
     if not istek.metin or len(istek.metin.strip()) < 10:
