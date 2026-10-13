@@ -146,6 +146,19 @@
         .kitap-bolum { margin: 2px 0 0; font-size: 13px; color: #5F7D60; }
         .kitap-aciklama { margin: 10px 0 0; font-family: var(--serif); font-size: 15px; line-height: 1.7; color: #3F5A43; }
 
+        .ust-cubuk { position: absolute; top: 16px; right: 20px; z-index: 10; }
+        .btn-ust {
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: 999px;
+            border: 1px solid var(--kenar);
+            background: rgba(255, 255, 255, 0.88);
+            color: #2F4A33;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+        .btn-ust:hover { background: #FFFFFF; border-color: var(--vurgu); }
+
         .uyari-metni { width: 100%; text-align: center; font-size: 12px; line-height: 1.5; color: var(--metin-soluk); padding: 20px; margin-top: 40px; transition: color 1.5s ease; }
 
         #girisEkrani {
@@ -171,6 +184,8 @@
         }
         .giris-karti input::placeholder { color: var(--ipucu); }
         .giris-karti input:focus { outline: none; border-color: var(--vurgu); box-shadow: 0 0 0 3px rgba(74, 132, 80, 0.15); }
+        .ad-satiri { display: none; gap: 10px; }
+        .ad-satiri input { width: auto; flex: 1; min-width: 0; }
         .auth-butonlar { display: flex; gap: 10px; margin-top: 8px; }
         .auth-butonlar .btn { flex: 1; }
         .btn-giris { background: var(--vurgu); color: #fff; }
@@ -180,7 +195,8 @@
         #authMesaj { min-height: 20px; margin-top: 14px; color: var(--hata); font-size: 13px; font-weight: 500; }
 
         @media (max-width: 520px) {
-            .container { padding-top: 36px; }
+            .container { padding-top: 56px; }
+            .ust-cubuk { top: 12px; right: 14px; }
             .baslik h1 { font-size: 27px; }
             textarea { height: 200px; font-size: 16px; }
             .btn-analiz { width: 100%; }
@@ -198,20 +214,31 @@
     <!-- GİRİŞ EKRANI -->
     <div id="girisEkrani">
         <div class="giris-karti">
-            <h2>İçsel Mentalist</h2>
-            <p>Hesabınla giriş yap ya da yeni bir hesap oluştur.</p>
+            <h2 id="girisBaslik">İçsel Mentalist</h2>
+            <p id="girisAciklama">Hesabınla giriş yap.</p>
+            <div class="ad-satiri" id="adSatiri">
+                <input type="text" id="adInput" placeholder="Ad" autocomplete="given-name" maxlength="60">
+                <input type="text" id="soyadInput" placeholder="Soyad" autocomplete="family-name" maxlength="60">
+            </div>
             <input type="email" id="emailInput" placeholder="ornek@mail.com" autocomplete="email">
             <input type="password" id="sifreInput" placeholder="Şifre" autocomplete="current-password">
             <div class="auth-butonlar">
-                <button class="btn btn-giris" onclick="kimlikIslemi('/giris_yap')">Giriş yap</button>
-                <button class="btn btn-kayit" onclick="kimlikIslemi('/kayit_ol')">Kayıt ol</button>
+                <button class="btn btn-giris" id="birincilButon" onclick="birincilTikla()">Giriş yap</button>
+                <button class="btn btn-kayit" id="ikincilButon" onclick="ikincilTikla()">Kayıt ol</button>
             </div>
             <div id="authMesaj" role="alert"></div>
         </div>
     </div>
 
+    <!-- ÜST ÇUBUK (sağ üst buton) -->
+    <header class="ust-cubuk" id="ustCubuk" style="display: none;">
+        <button class="btn-ust" id="ustButon" onclick="ustButonTikla()">Çıkış yap</button>
+    </header>
+
     <!-- ANA UYGULAMA -->
     <div class="container" id="anaUygulama" style="display: none;">
+
+        <div id="yazimEkrani">
 
         <div class="baslik">
             <h1 class="card-disi">İçsel Mentalist</h1>
@@ -235,12 +262,14 @@
         <div class="button-group">
             <div class="sol-butonlar">
                 <button class="btn btn-kaydet" onclick="kaydetTetikle()">Kaydet</button>
-                <button class="btn btn-cikis" onclick="cikisYap()">Çıkış yap</button>
                 <span id="kayitMesaji" class="bilgi-mesaji" role="status">Kaydedildi.</span>
             </div>
             <button class="btn btn-analiz" id="analizButonu" onclick="genelAnalizTetikle()">Beni dinle</button>
         </div>
 
+        </div><!-- /yazimEkrani -->
+
+        <div id="sonucEkrani" style="display: none;">
         <div id="sonucAlani" class="sonuc-kutusu">
             <h3>Zihinsel örüntü raporu</h3>
             <p id="analizMetni"></p>
@@ -253,6 +282,7 @@
                 <p class="kitap-aciklama" id="kitapAciklama"></p>
             </div>
         </div>
+        </div><!-- /sonucEkrani -->
     </div>
 
     <div class="uyari-metni" id="footerUyari" style="display: none;">
@@ -267,9 +297,9 @@
             const aktifEmail = localStorage.getItem("mentalist_user_email");
             if (aktifId && aktifEmail) { uygulamayiAc(); }
 
-            ["emailInput", "sifreInput"].forEach(id => {
+            ["adInput", "soyadInput", "emailInput", "sifreInput"].forEach(id => {
                 document.getElementById(id).addEventListener("keydown", (e) => {
-                    if (e.key === "Enter") kimlikIslemi('/giris_yap');
+                    if (e.key === "Enter") birincilTikla();
                 });
             });
 
@@ -291,44 +321,84 @@
                 });
             });
 
+            selamlamayiGuncelle();
+        });
+
+        function selamlamayiGuncelle() {
             const saat = new Date().getHours();
             let selam = "İyi akşamlar";
             if (saat < 6) selam = "İyi geceler";
             else if (saat < 12) selam = "Günaydın";
             else if (saat < 18) selam = "İyi günler";
-            document.getElementById('selamlama').innerText = selam + ". Bugün içinden neler geçti?";
-        });
+            const ad = localStorage.getItem("mentalist_user_ad");
+            document.getElementById('selamlama').innerText = selam + (ad ? ", " + ad : "") + ". Bugün içinden neler geçti?";
+        }
+
+        /* ---------- GİRİŞ / KAYIT FORMU (aynı sayfada geçiş) ---------- */
+        let kimlikModu = 'giris';
+
+        function modDegistir(mod) {
+            kimlikModu = mod;
+            const kayit = mod === 'kayit';
+            document.getElementById('adSatiri').style.display = kayit ? 'flex' : 'none';
+            document.getElementById('girisBaslik').textContent = kayit ? 'Hesap oluştur' : 'İçsel Mentalist';
+            document.getElementById('girisAciklama').textContent = kayit ? 'Birkaç bilgiyle başlayalım.' : 'Hesabınla giriş yap.';
+            document.getElementById('birincilButon').textContent = kayit ? 'Kayıt ol' : 'Giriş yap';
+            document.getElementById('ikincilButon').textContent = kayit ? 'Girişe dön' : 'Kayıt ol';
+            const sifre = document.getElementById('sifreInput');
+            sifre.placeholder = kayit ? 'Şifre (en az 6 karakter)' : 'Şifre';
+            sifre.setAttribute('autocomplete', kayit ? 'new-password' : 'current-password');
+            document.getElementById('authMesaj').innerText = '';
+        }
+
+        function birincilTikla() { kimlikIslemi(kimlikModu === 'kayit' ? '/kayit_ol' : '/giris_yap'); }
+        function ikincilTikla() { modDegistir(kimlikModu === 'kayit' ? 'giris' : 'kayit'); }
 
         async function kimlikIslemi(endpoint) {
+            const kayit = endpoint === '/kayit_ol';
+            const ad = document.getElementById('adInput').value.trim();
+            const soyad = document.getElementById('soyadInput').value.trim();
             const email = document.getElementById('emailInput').value.trim();
             const sifre = document.getElementById('sifreInput').value.trim();
             const mesajKutusu = document.getElementById('authMesaj');
 
+            if (kayit && (!ad || !soyad)) {
+                mesajKutusu.innerText = "Ad ve soyadını gir.";
+                return;
+            }
             if (!email || !sifre) {
                 mesajKutusu.innerText = "E-posta ve şifreni gir.";
                 return;
             }
+            if (kayit && sifre.length < 6) {
+                mesajKutusu.innerText = "Şifre en az 6 karakter olmalı.";
+                return;
+            }
+
+            const govde = kayit ? { ad: ad, soyad: soyad, email: email, sifre: sifre } : { email: email, sifre: sifre };
 
             try {
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: email, sifre: sifre })
+                    body: JSON.stringify(govde)
                 });
 
                 if (response.ok) {
                     const data = await response.json();
                     localStorage.setItem("mentalist_user_id", data.kullanici_id);
                     localStorage.setItem("mentalist_user_email", data.email);
+                    if (data.ad) localStorage.setItem("mentalist_user_ad", data.ad);
+                    else localStorage.removeItem("mentalist_user_ad");
                     mesajKutusu.innerText = "";
 
-                    document.getElementById('emailInput').value = "";
-                    document.getElementById('sifreInput').value = "";
+                    ["adInput", "soyadInput", "emailInput", "sifreInput"].forEach(id => { document.getElementById(id).value = ""; });
+                    modDegistir('giris');
 
                     uygulamayiAc();
                 } else {
                     const hata = await response.json();
-                    mesajKutusu.innerText = hata.detail;
+                    mesajKutusu.innerText = Array.isArray(hata.detail) ? "Bilgilerini kontrol et. Geçerli bir e-posta adresi gir." : hata.detail;
                 }
             } catch (err) {
                 mesajKutusu.innerText = "Sunucuya bağlanılamadı. Biraz sonra tekrar dene.";
@@ -338,12 +408,15 @@
         function uygulamayiAc() {
             document.getElementById('girisEkrani').style.display = 'none';
             document.getElementById('anaUygulama').style.display = 'block';
+            document.getElementById('ustCubuk').style.display = 'block';
             document.getElementById('footerUyari').style.display = 'block';
+            selamlamayiGuncelle();
         }
 
         function cikisYap() {
             localStorage.removeItem("mentalist_user_id");
             localStorage.removeItem("mentalist_user_email");
+            localStorage.removeItem("mentalist_user_ad");
             location.reload();
         }
 
@@ -407,6 +480,13 @@
             ctx.clearRect(0, 0, w, h);
             c.style.display = 'none';
             aktifEfekt = null;
+        }
+
+        function efektiDurdur() {
+            if (aktifEfekt) cancelAnimationFrame(aktifEfekt);
+            aktifEfekt = null;
+            const c = document.getElementById('efektKatmani');
+            if (c) c.style.display = 'none';
         }
 
         /* Kaydedince: ekran bir an gece gökyüzüne döner, yıldızlar kayar */
@@ -513,9 +593,10 @@
                 }
             }
 
-            const buton = document.getElementById('analizButonu');
-            const r = buton.getBoundingClientRect();
-            patlat(r.left + r.width / 2, r.top + r.height / 2, -Math.PI * 0.85, -Math.PI * 0.15, 110, 0);
+            const butonKonum = document.getElementById('analizButonu').getBoundingClientRect();
+            const ox = butonKonum.left + butonKonum.width / 2;
+            const oy = butonKonum.top + butonKonum.height / 2;
+            patlat(ox, oy, -Math.PI * 0.85, -Math.PI * 0.15, 110, 0);
             patlat(0, h, -Math.PI * 0.42, -Math.PI * 0.12, 70, 150);
             patlat(w, h, -Math.PI * 0.88, -Math.PI * 0.58, 70, 150);
 
@@ -590,10 +671,37 @@
             yildizKaymasi();
         }
 
+        /* ---------- EKRAN GEÇİŞLERİ ---------- */
+        let ekran = 'yazim';      // 'yazim' (ana sayfa) ya da 'sonuc' (analiz sonucu)
+        let analizIstekNo = 0;    // sonuç gelmeden ana sayfaya dönülürse eski cevabı yok saymak için
+
+        function ekraniDegistir(hedef) {
+            ekran = hedef;
+            document.getElementById('sonucEkrani').style.display = hedef === 'sonuc' ? 'block' : 'none';
+            document.getElementById('ustButon').textContent = hedef === 'sonuc' ? 'Ana sayfaya dön' : 'Çıkış yap';
+            if (hedef === 'yazim') window.scrollTo(0, 0);
+        }
+
+        function ustButonTikla() {
+            if (ekran === 'sonuc') anaSayfayaDon();
+            else cikisYap();
+        }
+
+        function anaSayfayaDon() {
+            analizIstekNo++;
+            efektiDurdur();
+            zeminiSifirla();
+            document.getElementById('sonucAlani').style.display = 'none';
+            const analizButonu = document.getElementById('analizButonu');
+            analizButonu.disabled = false;
+            analizButonu.textContent = "Beni dinle";
+            ekraniDegistir('yazim');
+        }
+
         async function genelAnalizTetikle() {
+            const istekNo = ++analizIstekNo;
             const sonucKutusu = document.getElementById('sonucAlani');
             const analizMetni = document.getElementById('analizMetni');
-            const buton = document.getElementById('analizButonu');
             const kullaniciId = localStorage.getItem("mentalist_user_id");
 
             const bekleMesajlari = [
@@ -605,11 +713,15 @@
             ];
             let mesajSirasi = 0;
 
-            sonucKutusu.style.display = 'block';
-            analizMetni.classList.add('yukleniyor');
-            analizMetni.textContent = bekleMesajlari[0];
+            const buton = document.getElementById('analizButonu');
             buton.disabled = true;
             buton.textContent = "Dinliyorum…";
+
+            ekraniDegistir('sonuc');
+            sonucKutusu.style.display = 'block';
+            sonucKutusu.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            analizMetni.classList.add('yukleniyor');
+            analizMetni.textContent = bekleMesajlari[0];
             document.getElementById('kitapOnerisi').style.display = 'none';
 
             const mesajDonguusu = setInterval(() => {
@@ -621,6 +733,7 @@
                 const response = await fetch('/genel_analiz/' + kullaniciId);
                 if (!response.ok) throw new Error("analiz-hatasi");
                 const veri = await response.json();
+                if (istekNo !== analizIstekNo) return;
 
                 analizMetni.classList.remove('yukleniyor');
                 analizMetni.textContent = veri.analiz;
@@ -643,12 +756,15 @@
 
                 if (!veri.yedek) konfeti();
             } catch (hata) {
+                if (istekNo !== analizIstekNo) return;
                 analizMetni.classList.remove('yukleniyor');
                 analizMetni.textContent = "Gemini şu an meşgul. Birazdan tekrar dene.";
             } finally {
                 clearInterval(mesajDonguusu);
-                buton.disabled = false;
-                buton.textContent = "Beni dinle";
+                if (istekNo === analizIstekNo) {
+                    buton.disabled = false;
+                    buton.textContent = "Beni dinle";
+                }
             }
         }
     </script>
