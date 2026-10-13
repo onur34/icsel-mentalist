@@ -27,10 +27,12 @@ app = FastAPI()
 SISTEM_MESAJI_5_SUTUN = """Sen Mentalist'sin. Kullanıcı sana gün içinde parça parça yazdığı TÜM günlük metinlerinin birleştirilmiş halini verecek.
 Görev: Bu toplam bağlamı inceleyip, kullanıcının BUGÜNKÜ zihinsel haritasını tek bir 5 sütunda özetlemek.
 ÇOK ÖNEMLİ KURAL: Her sütunu MAKSİMUM 1 VEYA 2 CÜMLE ile, nokta atışı ve çok kısa yaz.
-ASLA 3. şahıs veya robotik diller kullanma. 'Sen' dili kullan."""
+ASLA 3. şahıs veya robotik diller kullanma. 'Sen' dili kullan. Kesin hüküm verme; yorumlarını 'gibi görünüyor', 'olabilir' gibi temkinli bir dille yaz."""
 
 SISTEM_MESAJI_BUYUK_RESIM = """Sen Mentalist'sin. Sana kullanıcının geçmiş günlere ait '5 Sütunluk' bilinçaltı verileri verilecek.
-Görev: Bu verileri birleştirerek olay, bağlam, vitrin duygu ve bastırılan asıl duygu arasındaki ilişkiyi deşifre eden somut, şefkatli ama yüzleştirici bir 'Zihinsel Örüntü Raporu' yazmak.
+Görev: Bu verileri birleştirerek olay, bağlam, vitrin duygu ve bastırılan asıl duygu arasındaki ilişkiyi somut, şefkatli ve yargılamayan bir 'Zihinsel Örüntü Raporu' ile ortaya koymak.
+
+DİL KURALI: Kesin hüküm verme, teşhis koyma. Yorumlarını birer gözlem ve olasılık olarak sun: 'gibi görünüyor', 'olabilir', 'belki', 'bunu fark ediyor olabilirsin' gibi ifadeler kullan. 'Aslında', 'kanıtı', 'sabote ediyorsun' gibi kesinlik bildiren kalıplardan kaçın. Yalnızca verilerde gerçekten geçen şeylere dayan, veride olmayan bir şeyi çıkarım olarak ekleme. Birden fazla gün varsa günler arasında tekrar eden örüntüleri ve devam eden açık döngüleri 'bu günlerde ... tekrar ediyor gibi görünüyor' biçiminde an. Sert emirler ('göndermelisin' gibi) verme; nazik bir soru ya da küçük bir öneriyle bitir.
 
 ÇOK ÖNEMLİ KURAL: 'baskin_etiket' seçimi yaparken, kullanıcının EN SON (en güncel) tarihte yaşadığı duygu durumuna daha büyük bir ağırlık ver. Eski konuları kök sebep olarak diretme.
 Lafı uzatma, doğrudan analizini sun. ASLA 3. şahıs kullanma."""
@@ -337,7 +339,10 @@ def kaydet(istek: GunlukIstegi, arka_plan: BackgroundTasks):
 
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO gunluk_metinler (kullanici_id, tarih, saat, metin) VALUES (%s, %s, %s, %s)", (kullanici_id, bugun, su_an, istek.metin))
+        # Aynı metin bugün zaten kayıtlıysa tekrar yazma (hata sonrası tekrar basışlar çift kayıt oluşturmasın)
+        cursor.execute("SELECT 1 FROM gunluk_metinler WHERE kullanici_id = %s AND tarih = %s AND metin = %s LIMIT 1", (kullanici_id, bugun, istek.metin))
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO gunluk_metinler (kullanici_id, tarih, saat, metin) VALUES (%s, %s, %s, %s)", (kullanici_id, bugun, su_an, istek.metin))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -365,7 +370,7 @@ def genel_analiz(kullanici_id: int):
             analiz_gecmisi_metni += f"Tarih: {v[0]} | Tetikleyici: {v[1]} | Duygu Çatışması: {v[2]} | Savunma: {v[3]} | Bedensel İz: {v[4]} | Yarım Kalan Döngü: {v[5]} | Etiket: {v[6]}\n"
 
         # Veriler değişmediyse Gemini'yi tekrar çağırma: kayıtlı raporu göster (kota ve süre tasarrufu)
-        imza = hashlib.sha256(analiz_gecmisi_metni.encode()).hexdigest()
+        imza = hashlib.sha256((SISTEM_MESAJI_BUYUK_RESIM + analiz_gecmisi_metni).encode()).hexdigest()
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT imza, analiz, etiket FROM genel_analiz_onbellek WHERE kullanici_id = %s", (kullanici_id,))
