@@ -146,6 +146,18 @@
         .kitap-bolum { margin: 2px 0 0; font-size: 13px; color: #5F7D60; }
         .kitap-aciklama { margin: 10px 0 0; font-family: var(--serif); font-size: 15px; line-height: 1.7; color: #3F5A43; }
 
+        /* Ruh haline göre arka plan gradyanları (sadece yazı ekranında, seçilince) */
+        .ruh-zemini { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+        .ruh-katman { position: absolute; inset: 0; opacity: 0; transition: opacity 1.2s ease-in-out; }
+        .ruh-katman.aktif { opacity: 1; }
+        .ruh-katman[data-ruh="huzurlu"] { background: linear-gradient(160deg, #E3F3E6 0%, #D6EBEF 55%, #CBE3F3 100%); }
+        .ruh-katman[data-ruh="mutlu"]   { background: linear-gradient(160deg, #FFF3CF 0%, #FFE3BF 55%, #FFD0B5 100%); }
+        .ruh-katman[data-ruh="yorgun"]  { background: linear-gradient(160deg, #E2E7EF 0%, #CFD7E3 55%, #BCC6D6 100%); }
+        .ruh-katman[data-ruh="kaygili"] { background: linear-gradient(160deg, #E8E1F5 0%, #E3DAEF 50%, #F0D9E2 100%); }
+        .ruh-katman[data-ruh="uzgun"]   { background: linear-gradient(160deg, #D9E6F4 0%, #C3D6EC 55%, #AEC5E0 100%); }
+        .ruh-katman[data-ruh="ofkeli"]  { background: linear-gradient(160deg, #F8DAD1 0%, #F2C2B2 55%, #EBA896 100%); }
+        body.ruh-aktif { --metin-soluk: #3F5A43; }
+
         .ust-cubuk { position: absolute; top: 16px; right: 20px; z-index: 10; }
         .btn-ust {
             padding: 8px 18px;
@@ -211,6 +223,16 @@
 </head>
 <body>
 
+    <!-- Ruh haline göre değişen arka plan katmanları -->
+    <div class="ruh-zemini" id="ruhZemini" aria-hidden="true">
+        <div class="ruh-katman" data-ruh="huzurlu"></div>
+        <div class="ruh-katman" data-ruh="mutlu"></div>
+        <div class="ruh-katman" data-ruh="yorgun"></div>
+        <div class="ruh-katman" data-ruh="kaygili"></div>
+        <div class="ruh-katman" data-ruh="uzgun"></div>
+        <div class="ruh-katman" data-ruh="ofkeli"></div>
+    </div>
+
     <!-- GİRİŞ EKRANI -->
     <div id="girisEkrani">
         <div class="giris-karti">
@@ -246,12 +268,12 @@
         </div>
 
         <div class="ruh-hali" id="ruhHali" role="group" aria-label="Şu anki ruh halin">
-            <button type="button" class="chip" aria-pressed="false">Huzurlu</button>
-            <button type="button" class="chip" aria-pressed="false">Mutlu</button>
-            <button type="button" class="chip" aria-pressed="false">Yorgun</button>
-            <button type="button" class="chip" aria-pressed="false">Kaygılı</button>
-            <button type="button" class="chip" aria-pressed="false">Üzgün</button>
-            <button type="button" class="chip" aria-pressed="false">Öfkeli</button>
+            <button type="button" class="chip" data-ruh="huzurlu" aria-pressed="false">Huzurlu</button>
+            <button type="button" class="chip" data-ruh="mutlu" aria-pressed="false">Mutlu</button>
+            <button type="button" class="chip" data-ruh="yorgun" aria-pressed="false">Yorgun</button>
+            <button type="button" class="chip" data-ruh="kaygili" aria-pressed="false">Kaygılı</button>
+            <button type="button" class="chip" data-ruh="uzgun" aria-pressed="false">Üzgün</button>
+            <button type="button" class="chip" data-ruh="ofkeli" aria-pressed="false">Öfkeli</button>
         </div>
 
         <div class="yazi-alani">
@@ -291,6 +313,16 @@
 
     <script>
         let seciliRuhHali = "";
+        let seciliRuhAnahtar = "";
+
+        /* Seçili duyguya ait gradyanı göster; duygu seçilmediyse ya da analiz sonucu açıksa gizle */
+        function ruhZemininiGuncelle() {
+            const goster = (typeof ekran !== 'undefined' && ekran === 'sonuc') ? "" : seciliRuhAnahtar;
+            document.querySelectorAll('#ruhZemini .ruh-katman').forEach(k => {
+                k.classList.toggle('aktif', goster !== "" && k.dataset.ruh === goster);
+            });
+            document.body.classList.toggle('ruh-aktif', goster !== "");
+        }
 
         document.addEventListener("DOMContentLoaded", () => {
             const aktifId = localStorage.getItem("mentalist_user_id");
@@ -314,10 +346,13 @@
                     document.querySelectorAll("#ruhHali .chip").forEach(c => c.setAttribute("aria-pressed", "false"));
                     if (zatenSecili) {
                         seciliRuhHali = "";
+                        seciliRuhAnahtar = "";
                     } else {
                         chip.setAttribute("aria-pressed", "true");
                         seciliRuhHali = chip.innerText;
+                        seciliRuhAnahtar = chip.dataset.ruh;
                     }
+                    ruhZemininiGuncelle();
                 });
             });
 
@@ -664,6 +699,8 @@
             document.getElementById('sayac').innerText = "0 karakter";
             document.querySelectorAll("#ruhHali .chip").forEach(c => c.setAttribute("aria-pressed", "false"));
             seciliRuhHali = "";
+            seciliRuhAnahtar = "";
+            ruhZemininiGuncelle();
             zeminiSifirla();
             document.getElementById('sonucAlani').style.display = 'none';
 
@@ -680,6 +717,7 @@
             document.getElementById('sonucEkrani').style.display = hedef === 'sonuc' ? 'block' : 'none';
             document.getElementById('ustButon').textContent = hedef === 'sonuc' ? 'Ana sayfaya dön' : 'Çıkış yap';
             if (hedef === 'yazim') window.scrollTo(0, 0);
+            ruhZemininiGuncelle();
         }
 
         function ustButonTikla() {
