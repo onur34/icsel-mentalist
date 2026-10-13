@@ -319,7 +319,7 @@ def genel_analiz(kullanici_id: int):
     try:
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac, otomatik_savunma_kacis_refleksi, etiket FROM gunluk_icgoruler WHERE kullanici_id = %s ORDER BY tarih ASC", (kullanici_id,))
+        cursor.execute("SELECT tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac, otomatik_savunma_kacis_refleksi, bedensel_ve_enerji_izi, acikta_kalan_yarim_birakilan_dongu, etiket FROM gunluk_icgoruler WHERE kullanici_id = %s ORDER BY tarih ASC", (kullanici_id,))
         gecmis_veriler = cursor.fetchall()
         conn.close()
 
@@ -328,7 +328,7 @@ def genel_analiz(kullanici_id: int):
 
         analiz_gecmisi_metni = "Kullanıcının Zihinsel Örüntüleri:\n"
         for v in gecmis_veriler:
-            analiz_gecmisi_metni += f"Tarih: {v[0]} | Tetikleyici: {v[1]} | Duygu Çatışması: {v[2]} | Savunma: {v[3]} | Etiket: {v[4]}\n"
+            analiz_gecmisi_metni += f"Tarih: {v[0]} | Tetikleyici: {v[1]} | Duygu Çatışması: {v[2]} | Savunma: {v[3]} | Bedensel İz: {v[4]} | Yarım Kalan Döngü: {v[5]} | Etiket: {v[6]}\n"
 
         # Veriler değişmediyse Gemini'yi tekrar çağırma: kayıtlı raporu göster (kota ve süre tasarrufu)
         imza = hashlib.sha256(analiz_gecmisi_metni.encode()).hexdigest()
@@ -375,7 +375,7 @@ def genel_analiz(kullanici_id: int):
                 neden = ("Yapay zekâ servisinin günlük kullanım sınırı doldu" if kota_doldu else "Yapay zekâ şu an çok yoğun")
                 buyuk_resim_raporu = {
                     "genel_analiz_metni": neden + ", bu yüzden ayrıntılı raporu hazırlayamadım. Son kaydına göre sana bir renk ve kitap seçtim. Daha sonra tekrar deneyebilirsin.",
-                    "baskin_etiket": gecmis_veriler[-1][4] or "olagan_bir_gun",
+                    "baskin_etiket": gecmis_veriler[-1][6] or "olagan_bir_gun",
                 }
         baskin_etiket = buyuk_resim_raporu.get("baskin_etiket", "").strip().lower()
         if baskin_etiket not in RENK_PALETI: baskin_etiket = "olagan_bir_gun"
