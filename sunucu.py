@@ -63,6 +63,14 @@ RENK_PALETI = {
     "olagan_bir_gun": "#0f172a", "varsayilan_karanlik": "#0f172a"
 }
 
+KITAPLIK_YOLU = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kitaplik.json")
+try:
+    with open(KITAPLIK_YOLU, "r", encoding="utf-8") as f:
+        KITAPLIK = json.load(f)
+except FileNotFoundError:
+    print("UYARI: kitaplik.json bulunamadı, kitap önerisi verilmeyecek.")
+    KITAPLIK = {}
+
 def gemini_istek_at(icerik_metni, sistem_mesaji, sema, deneme_sayisi=3):
     for i in range(deneme_sayisi):
         try:
@@ -228,7 +236,7 @@ async def genel_analiz(kullanici_id: int):
         conn.close()
 
         if not gecmis_veriler:
-            return {"analiz": "Henüz sana ait yeterli veri yok.", "renk": RENK_PALETI["varsayilan_karanlik"]}
+            return {"analiz": "Henüz sana ait yeterli veri yok.", "renk": RENK_PALETI["varsayilan_karanlik"], "kitap": None}
 
         analiz_gecmisi_metni = "Kullanıcının Zihinsel Örüntüleri:\n"
         for v in gecmis_veriler:
@@ -242,6 +250,8 @@ async def genel_analiz(kullanici_id: int):
         analiz_metni = robotik_dil_temizle(buyuk_resim_raporu.get("genel_analiz_metni", ""))
         arka_plan_rengi = RENK_PALETI.get(baskin_etiket, RENK_PALETI["varsayilan_karanlik"])
         
-        return {"analiz": analiz_metni, "renk": arka_plan_rengi}
+        kitap_onerisi = KITAPLIK.get(baskin_etiket)
+
+        return {"analiz": analiz_metni, "renk": arka_plan_rengi, "kitap": kitap_onerisi}
     except Exception as e:
         raise HTTPException(status_code=500, detail="Sunucu meşgul, lütfen tekrar dene.")
