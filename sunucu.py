@@ -77,6 +77,8 @@ YEDEK_MODELLER = [m.strip() for m in (os.getenv("GEMINI_YEDEK_MODELLER") or os.g
 # 1 ise, listede olmayan ama hesabında kullanılabilen "flash" modelleri de son çare olarak denenir
 OTOMATIK_YEDEK = os.getenv("GEMINI_OTOMATIK_YEDEK", "1") == "1"
 MAKS_MODEL_SAYISI = 5
+# Google'ın model listesinden (ai.google.dev) alınan hazır yedekler. Kodda hazır olduğu için ayrıca bir şey yazman gerekmez.
+VARSAYILAN_YEDEKLER = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
 _bloklu_modeller = {}  # model -> tekrar denenebileceği zaman (epoch saniye)
 _kesfedilen = {"zaman": 0, "liste": []}
@@ -113,7 +115,7 @@ def kesfedilen_modeller():
 
 def model_zinciri():
     zincir = []
-    for m in [MODEL_ADI] + YEDEK_MODELLER + (kesfedilen_modeller() if OTOMATIK_YEDEK else []):
+    for m in [MODEL_ADI] + YEDEK_MODELLER + VARSAYILAN_YEDEKLER + (kesfedilen_modeller() if OTOMATIK_YEDEK else []):
         if m not in zincir:
             zincir.append(m)
     return zincir
@@ -176,6 +178,8 @@ def init_db():
                       id SERIAL PRIMARY KEY, 
                       email TEXT UNIQUE, 
                       sifre TEXT)''')
+    cursor.execute("ALTER TABLE kullanicilar ADD COLUMN IF NOT EXISTS ad TEXT")
+    cursor.execute("ALTER TABLE kullanicilar ADD COLUMN IF NOT EXISTS soyad TEXT")
 
     cursor.execute('''CREATE TABLE IF NOT EXISTS gunluk_metinler (
                       id SERIAL PRIMARY KEY, 
@@ -213,6 +217,12 @@ class KullaniciIstegi(BaseModel):
     email: EmailStr
     sifre: str
 
+class KayitIstegi(BaseModel):
+    ad: str
+    soyad: str
+    email: EmailStr
+    sifre: str
+
 def robotik_dil_temizle(metin: str) -> str:
     if not isinstance(metin, str): return metin
     return metin.replace("Karakterin", "Senin").replace("Karakter", "Sen").replace("Kullanıcının", "Senin").replace("Kullanıcı", "Sen").replace("Yazar", "Sen")
@@ -226,18 +236,26 @@ def arka_plan_resmi():
     return FileResponse("patrick_jane.jpg") if os.path.exists("patrick_jane.jpg") else {"mesaj": "Resim bulunamadı."}
 
 @app.post("/kayit_ol")
-async def kayit_ol(istek: KullaniciIstegi):
+async def kayit_ol(istek: KayitIstegi):
+    ad = istek.ad.strip()[:60]
+    soyad = istek.soyad.strip()[:60]
     email = istek.email.strip().lower()
+
+    if not ad or not soyad:
+        raise HTTPException(status_code=400, detail="Ad ve soyad boş bırakılamaz.")
+    if len(istek.sifre) < 6:
+        raise HTTPException(status_code=400, detail="Şifre en az 6 karakter olmalı.")
+
     gizli_sifre = sifre_kriptola(istek.sifre)
-    
+
     conn = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO kullanicilar (email, sifre) VALUES (%s, %s) RETURNING id", (email, gizli_sifre))
+        cursor.execute("INSERT INTO kullanicilar (email, sifre, ad, soyad) VALUES (%s, %s, %s, %s) RETURNING id", (email, gizli_sifre, ad, soyad))
         yeni_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
-        return {"durum": "basarili", "kullanici_id": yeni_id, "email": email}
+        return {"durum": "basarili", "kullanici_id": yeni_id, "email": email, "ad": ad}
     except psycopg2.IntegrityError:
         conn.rollback()
         conn.close()
@@ -247,51 +265,17 @@ async def kayit_ol(istek: KullaniciIstegi):
 async def giris_yap(istek: KullaniciIstegi):
     email = istek.email.strip().lower()
     gizli_sifre = sifre_kriptola(istek.sifre)
-    
+
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, email FROM kullanicilar WHERE email = %s AND sifre = %s", (email, gizli_sifre))
+    cursor.execute("SELECT id, email, ad FROM kullanicilar WHERE email = %s AND sifre = %s", (email, gizli_sifre))
     kullanici = cursor.fetchone()
     conn.close()
 
     if not kullanici:
         raise HTTPException(status_code=400, detail="E-posta adresi veya şifre hatalı!")
-        
-    return {"durum": "basarili", "kullanici_id": kullanici[0], "email": kullanici[1]}
 
-def gunluk_icgorusu_uret(kullanici_id: int, bugun: str):
-    """Arka planda çalışır: günün tüm metinlerini birleştirip Gemini ile 5 sütunluk içgörü üretir."""
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT saat, metin FROM gunluk_metinler WHERE tarih = %s AND kullanici_id = %s ORDER BY saat ASC", (bugun, kullanici_id))
-        bugunun_kayitlari = cursor.fetchall()
-        birlestirilmis_metin = "\n\n".join([f"[{k[0]}] {k[1]}" for k in bugunun_kayitlari])
-
-        response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
-        analiz = json.loads(response.text)
-
-        for anahtar, deger in analiz.items():
-            if anahtar != "etiket": analiz[anahtar] = robotik_dil_temizle(deger)
-        if analiz.get("etiket", "").strip().lower() not in RENK_PALETI:
-            analiz["etiket"] = "olagan_bir_gun"
-
-        cursor.execute("DELETE FROM gunluk_icgoruler WHERE tarih = %s AND kullanici_id = %s", (bugun, kullanici_id))
-        cursor.execute('''
-            INSERT INTO gunluk_icgoruler (
-                kullanici_id, tarih, somut_tetikleyici_capasi, vitrin_duygusu_vs_bastirilan_ihtiyac,
-                otomatik_savunma_kacis_refleksi, bedensel_ve_enerji_izi, acikta_kalan_yarim_birakilan_dongu, etiket
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            kullanici_id, bugun, analiz.get("somut_tetikleyici_capasi", ""),
-            analiz.get("vitrin_duygusu_vs_bastirilan_ihtiyac", ""), analiz.get("otomatik_savunma_kacis_refleksi", ""),
-            analiz.get("bedensel_ve_enerji_izi", ""), analiz.get("acikta_kalan_yarim_birakilan_dongu", ""),
-            analiz.get("etiket", "")
-        ))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Günlük içgörü arka planda üretilemedi: {e}")
+    return {"durum": "basarili", "kullanici_id": kullanici[0], "email": kullanici[1], "ad": kullanici[2] or ""}
 
 @app.post("/kaydet")
 def kaydet(istek: GunlukIstegi, arka_plan: BackgroundTasks):
