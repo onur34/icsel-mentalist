@@ -8,13 +8,16 @@ import json
 import os
 import time
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 from google import genai
 from google.genai import types
 
 load_dotenv()
+
+# Render sunucuları UTC çalışır; günün Türkiye saatine (UTC+3) göre bitmesi için
+TR_SAAT = timezone(timedelta(hours=3))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -55,12 +58,23 @@ class BuyukResimAnaliz(BaseModel):
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 RENK_PALETI = {
-    "tukenmislik_hissi": "#1c1f24", "ofke_patlamalari": "#2e0f0f", "degersizlik_korkusu": "#101621",
-    "anksiyete_krizi": "#191c18", "yalnizlik_ve_izolasyon": "#151515", "onay_ihtiyaci": "#171523",
-    "yuzlesme_korkusu": "#221111", "sinir_koyamama": "#1a1e1a", "mukemmeliyetcilik": "#1f2022",
-    "zihinsel_asiri_yuklenme": "#161b22", "isyan_ve_haksizlik": "#2c1212", "varolus_sancisi_ve_anlam_arayisi": "#12151e",
-    "kurban_psikolojisi": "#1a1614", "kontrol_takintisi": "#17181c", "duygusal_bagimlilik": "#1d151c",
-    "olagan_bir_gun": "#0f172a", "varsayilan_karanlik": "#0f172a"
+    "tukenmislik_hissi": "#D6DCE4",
+    "ofke_patlamalari": "#F5C8C4",
+    "degersizlik_korkusu": "#CDE4F0",
+    "anksiyete_krizi": "#E4D9F0",
+    "yalnizlik_ve_izolasyon": "#D2E8E4",
+    "onay_ihtiyaci": "#F6E0C6",
+    "yuzlesme_korkusu": "#EBD3DC",
+    "sinir_koyamama": "#DCEBD0",
+    "mukemmeliyetcilik": "#D6DDF0",
+    "zihinsel_asiri_yuklenme": "#F2E8C2",
+    "isyan_ve_haksizlik": "#F4D2B8",
+    "varolus_sancisi_ve_anlam_arayisi": "#D8D3EA",
+    "kurban_psikolojisi": "#E3D5CC",
+    "kontrol_takintisi": "#E0DDD3",
+    "duygusal_bagimlilik": "#F0D0E4",
+    "olagan_bir_gun": "#E4F0E0",
+    "varsayilan_karanlik": "#E4F0E0"
 }
 
 KITAPLIK_YOLU = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kitaplik.json")
@@ -284,8 +298,8 @@ def kaydet(istek: GunlukIstegi, arka_plan: BackgroundTasks):
 
     kullanici_id = istek.kullanici_id
     try:
-        bugun = datetime.now().strftime("%Y-%m-%d")
-        su_an = datetime.now().strftime("%H:%M:%S")
+        bugun = datetime.now(TR_SAAT).strftime("%Y-%m-%d")
+        su_an = datetime.now(TR_SAAT).strftime("%H:%M:%S")
 
         conn = get_db()
         cursor = conn.cursor()
