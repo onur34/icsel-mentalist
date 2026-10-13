@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr
@@ -186,34 +186,18 @@ async def giris_yap(istek: KullaniciIstegi):
         
     return {"durum": "basarili", "kullanici_id": kullanici[0], "email": kullanici[1]}
 
-@app.post("/kaydet")
-def kaydet(istek: GunlukIstegi):
-    if not istek.metin or len(istek.metin.strip()) < 10:
-        raise HTTPException(status_code=400, detail="Metin çok kısa.")
-
-    kullanici_id = istek.kullanici_id
+def gunluk_icgorusu_uret(kullanici_id: int, bugun: str):
+    """Arka planda çalışır: günün tüm metinlerini birleştirip Gemini ile 5 sütunluk içgörü üretir."""
     try:
-        bugun = datetime.now().strftime("%Y-%m-%d")
-        su_an = datetime.now().strftime("%H:%M:%S")
-        
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO gunluk_metinler (kullanici_id, tarih, saat, metin) VALUES (%s, %s, %s, %s)", (kullanici_id, bugun, su_an, istek.metin))
-        
-        cursor.execute("SELECT saat, metin FROM gunluk_metinler WHERE tarih = %s AND kullanici_id = %s", (bugun, kullanici_id))
+        cursor.execute("SELECT saat, metin FROM gunluk_metinler WHERE tarih = %s AND kullanici_id = %s ORDER BY saat ASC", (bugun, kullanici_id))
         bugunun_kayitlari = cursor.fetchall()
-        conn.commit()
-        
         birlestirilmis_metin = "\n\n".join([f"[{k[0]}] {k[1]}" for k in bugunun_kayitlari])
-        
-        try:
-            response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
-            analiz = json.loads(response.text)
-        except Exception as e:
-            print(f"Günlük kaydedildi ama analiz yapılamadı: {e}")
-            conn.close()
-            return {"durum": "basarili", "analiz": "ertelendi"}
-        
+
+        response = gemini_istek_at(birlestirilmis_metin, SISTEM_MESAJI_5_SUTUN, BesSutunAnaliz)
+        analiz = json.loads(response.text)
+
         for anahtar, deger in analiz.items():
             if anahtar != "etiket": analiz[anahtar] = robotik_dil_temizle(deger)
         if analiz.get("etiket", "").strip().lower() not in RENK_PALETI:
@@ -233,11 +217,31 @@ def kaydet(istek: GunlukIstegi):
         ))
         conn.commit()
         conn.close()
-        
-        # ESKİ HALİ: Ekrana çıktı vermez, sadece başarılı döndürür
-        return {"durum": "basarili"}
     except Exception as e:
+        print(f"Günlük içgörü arka planda üretilemedi: {e}")
+
+@app.post("/kaydet")
+def kaydet(istek: GunlukIstegi, arka_plan: BackgroundTasks):
+    if not istek.metin or len(istek.metin.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Metin çok kısa.")
+
+    kullanici_id = istek.kullanici_id
+    try:
+        bugun = datetime.now().strftime("%Y-%m-%d")
+        su_an = datetime.now().strftime("%H:%M:%S")
+
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO gunluk_metinler (kullanici_id, tarih, saat, metin) VALUES (%s, %s, %s, %s)", (kullanici_id, bugun, su_an, istek.metin))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Kayıt hatası: {e}")
         raise HTTPException(status_code=500, detail="Sunucu meşgul, lütfen tekrar dene.")
+
+    # Cevap hemen döner; Gemini analizi kullanıcıyı bekletmeden arka planda yapılır
+    arka_plan.add_task(gunluk_icgorusu_uret, kullanici_id, bugun)
+    return {"durum": "basarili"}
 
 @app.get("/genel_analiz/{kullanici_id}")
 def genel_analiz(kullanici_id: int):
